@@ -99,6 +99,36 @@ keep it on your home LAN.
 - **SFTP:** works out of the box over SSH — point FileZilla/WinSCP at
   `simpsonstv.local`, user `pi`, and drop files into `~/simpsonstv/videos/`.
   (Skip plain FTP — it's unencrypted and needs extra server setup for no benefit.)
+- **exFAT partition:** dedicate most of the SD card to an exFAT partition that
+  Windows mounts natively — pop the card out, drag episodes on, done. See below.
+
+## exFAT partition (card readable in Windows)
+
+Order matters: the partition must be created **after flashing but before the
+Pi's first boot**. Pi OS normally expands its root partition to fill the card on
+first boot; an extra partition after root blocks that (the resize script only
+runs when root is the last partition), which is exactly what we want.
+
+1. Flash Raspberry Pi OS Lite with the Imager (set WiFi/SSH), leave card in PC.
+2. Open an **admin** Command Prompt and run `diskpart`:
+   ```
+   list disk
+   select disk X        <- the SD card. CHECK THE SIZE. Wrong disk = data loss.
+   create partition primary offset=8388608
+   format fs=exfat quick label=PITV
+   assign
+   exit
+   ```
+   The `offset` (KB) leaves the first 8 GB for the OS; everything after it
+   becomes the exFAT partition. On a 64 GB card that's ~56 GB for episodes.
+   You can drag episodes onto the new `PITV` drive right now.
+3. Boot the Pi, install as usual, then run: `bash setup_exfat.sh`
+   It grows the OS into its reserved 8 GB, mounts the exFAT partition as the
+   videos folder permanently, and moves any existing episodes onto it.
+
+Afterwards all roads lead to the same place: card-in-Windows, Samba, SFTP, and
+web uploads all land on the exFAT partition. Notes: needs Windows 10 1703+ to
+see multiple partitions on an SD card; macOS reads exFAT fine too.
 
 ## Files
 
