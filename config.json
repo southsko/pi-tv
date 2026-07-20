@@ -1,0 +1,11 @@
+{
+  "web_port": 8080,
+  "power_switch_mode": "toggle",
+  "pins": {
+    "power_button": 26,
+    "channel_button": 20,
+    "backlight": 19,
+    "amp_enable": 18
+  },
+  "mpv_args": ["--vo=gpu", "--gpu-context=drm", "--hwdec=auto-safe", "--ao=alsa", "--panscan=1.0"]
+}
