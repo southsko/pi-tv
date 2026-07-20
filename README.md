@@ -116,18 +116,25 @@ Order matters: this must happen **after flashing but before the Pi's first
 boot**. Pi OS normally expands its root partition to fill the whole card on
 first boot — all or nothing, no size option — so we either block it or replace it.
 
-### Option A: automatic (recommended)
+### Option A: PowerShell partitioner (recommended)
 
-1. Flash Raspberry Pi OS Lite with the Imager (set WiFi/SSH in its
-   customization — that's required, it generates the `firstrun.sh` we hook).
-2. With the card still in the PC, right-click `prepare_card.ps1` → Run with
-   PowerShell. It disables the built-in whole-card resize and makes the Pi's
-   own first boot cap the OS at 8 GB and carve the rest into a data partition.
-3. Boot the Pi, then run `bash install.sh && bash setup_exfat.sh` — the second
-   script formats the data partition as exFAT (label `PITV`) and mounts it as
-   the videos folder.
+1. Flash Raspberry Pi OS Lite with the Imager (set WiFi/SSH), leave card in PC.
+2. Right-click `partition_card.ps1` → Run with PowerShell. It auto-elevates,
+   finds the SD card by its boot files, shows you which disk it found, and on
+   confirm creates + formats the exFAT `PITV` partition from the 8 GB mark.
+   You can drag episodes onto it immediately.
+3. Boot the Pi and run `setup.sh` as usual — it reclaims the 8 GB gap for the
+   OS and mounts `PITV` as the videos folder.
 
-### Option B: manual (diskpart)
+### Option B: first-boot automatic (`prepare_card.ps1`)
+
+Same timing as A, but instead of partitioning from Windows it hooks the Imager's
+`firstrun.sh` so the Pi partitions itself on first boot (OS capped at 8 GB, rest
+becomes the data partition, formatted by `setup.sh`). Requires Imager
+customization to be used. Prefer A — it's more deterministic and you can load
+episodes before ever booting the Pi.
+
+### Option C: manual (diskpart)
 
 1. Flash Raspberry Pi OS Lite with the Imager (set WiFi/SSH), leave card in PC.
 2. Open an **admin** Command Prompt and run `diskpart`:
