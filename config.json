@@ -1,6 +1,12 @@
 {
   "web_port": 8080,
   "power_switch_mode": "toggle",
+  "touch": {
+    "enabled": true,
+    "rotate": 90,
+    "swipe_px": 80,
+    "long_press_s": 0.8
+  },
   "pins": {
     "power_button": 26,
     "channel_button": 20,

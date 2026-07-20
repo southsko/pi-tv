@@ -14,6 +14,7 @@ and adds channels, a channel-change static effect, and a web remote.
 | RPi.GPIO + raspi-gpio (both deprecated) | gpiozero + pinctrl |
 | One shuffled folder | Channels: every subfolder of `videos/` is a channel |
 | — | TV-static effect when changing channels |
+| — | Touchscreen gestures (the Waveshare 2.8" panel is capacitive touch) |
 | — | Web remote: play/pause, skip, channel, volume, upload episodes from your phone |
 | — | Remembers channel + volume across reboots |
 
@@ -51,6 +52,24 @@ in `config.json`.
    For the Zero 2 W, encode to 480p H.264 for smooth playback:
    `ffmpeg -i in.mkv -vf scale=640:480 -c:v libx264 -profile:v high -level 4.0 -c:a aac out.mp4`
 5. `sudo systemctl start simpsonstv`
+
+## Touchscreen
+
+The Waveshare 2.8" DPI panel used in the current build guide has capacitive touch,
+which shows up as a normal Linux input device — so the TV itself is a remote:
+
+| Gesture | Action |
+|---|---|
+| Tap | Play / pause |
+| Swipe left / right | Previous / next channel (with static effect) |
+| Swipe up / down | Volume up / down |
+| Long press (0.8s) | Power toggle |
+
+Feedback appears as an on-screen OSD (channel name, volume). Configure in
+`config.json` under `touch` — set `rotate` to match your `display_rotate`
+(90 is right for the standard portrait-mounted build; if swipes feel
+backwards, try 270), or `enabled: false` to turn it off. Physical buttons
+remain optional and work alongside touch.
 
 ## Web remote + file manager
 

@@ -7,7 +7,7 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "==> Installing packages (mpv, flask, gpiozero, ffmpeg)..."
 sudo apt update
-sudo apt install -y mpv python3-flask python3-gpiozero ffmpeg
+sudo apt install -y mpv python3-flask python3-gpiozero python3-evdev ffmpeg
 
 echo "==> Creating videos folder structure..."
 mkdir -p "$DIR/videos/simpsons"

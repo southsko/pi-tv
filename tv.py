@@ -19,6 +19,7 @@ import time
 from channels import ChannelManager
 from hardware import Hardware
 from mpv_ipc import MPV, MPVError
+from touch import TouchInput
 from webui import create_app
 
 BASE = os.path.dirname(os.path.realpath(__file__))
@@ -61,6 +62,7 @@ class TV:
         self.hw = Hardware(cfg,
                            on_power_toggle=self.toggle_power,
                            on_channel_press=lambda: self.change_channel(1))
+        self.touch = TouchInput(self, cfg)
 
     # -- startup ------------------------------------------------------------
 
@@ -68,7 +70,14 @@ class TV:
         self.mpv.start()
         self.mpv.set("volume", self.channels.volume)
         self.hw.set_power(True)
+        self.touch.start()
         self.next_episode()
+
+    def osd(self, text):
+        try:
+            self.mpv.command("show-text", text)
+        except MPVError:
+            pass
 
     # -- mpv events -----------------------------------------------------------
 
@@ -123,7 +132,9 @@ class TV:
 
     def toggle_pause(self):
         try:
-            self.mpv.set("pause", not self.mpv.get("pause", False))
+            paused = not self.mpv.get("pause", False)
+            self.mpv.set("pause", paused)
+            self.osd("⏸" if paused else "▶")
         except MPVError:
             pass
 
@@ -136,11 +147,14 @@ class TV:
             pass
 
     def change_channel(self, step=1):
-        if self.channels.change_channel(step) is not None:
+        name = self.channels.change_channel(step)
+        if name is not None:
+            self.osd("ch %d  %s" % (self.channels.index + 1, name))
             self._tune()
 
     def set_channel(self, name):
         if self.channels.set_channel(name) is not None:
+            self.osd("ch %d  %s" % (self.channels.index + 1, name))
             self._tune()
 
     def set_volume(self, volume):
@@ -149,6 +163,7 @@ class TV:
             self.mpv.set("volume", vol)
         except MPVError:
             pass
+        self.osd("vol %d" % vol)
 
     def status(self):
         now = None
