@@ -20,6 +20,14 @@ echo "=========================================="
 
 bash install.sh
 
+# The TV plays straight to the display from the console (DRM) - a desktop
+# session just wastes the Zero's RAM and fights over the screen.
+if [ "$(systemctl get-default)" = "graphical.target" ]; then
+  echo "==> Desktop image detected - switching to console boot (desktop stays installed)"
+  sudo systemctl set-default multi-user.target
+  NEED_REBOOT=1
+fi
+
 if [ -z "$SKIP_SCREEN" ]; then
   if grep -q "pi-tv waveshare" /boot/firmware/config.txt /boot/config.txt 2>/dev/null; then
     echo "==> Screen already configured"
