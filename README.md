@@ -93,7 +93,9 @@ keep it on your home LAN.
 
 - **Network drive (recommended):** run `bash setup_share.sh` once, then the videos
   folder appears as `\\simpsonstv\videos` on Windows / `smb://simpsonstv.local/videos`
-  on Mac. Drag episodes in; each subfolder is a channel.
+  on Mac. Drag episodes in; each subfolder is a channel. Guest read+write. After
+  setup, the share can be switched on/off from the web UI (the setup script adds a
+  narrow sudoers rule so the service can start/stop smbd — nothing else).
 - **SFTP:** works out of the box over SSH — point FileZilla/WinSCP at
   `simpsonstv.local`, user `pi`, and drop files into `~/simpsonstv/videos/`.
   (Skip plain FTP — it's unencrypted and needs extra server setup for no benefit.)

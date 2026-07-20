@@ -32,6 +32,13 @@ else
 fi
 
 sudo systemctl restart smbd
+
+echo "==> Allowing the web UI to toggle the share (sudoers rule)..."
+sudo tee /etc/sudoers.d/simpsonstv-samba >/dev/null <<EOF
+$USER ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl stop smbd, /usr/bin/systemctl enable smbd, /usr/bin/systemctl disable smbd
+EOF
+sudo chmod 440 /etc/sudoers.d/simpsonstv-samba
+
 echo
 echo "Done. On Windows open:  \\\\$(hostname)\\videos"
 echo "On Mac/Linux:           smb://$(hostname).local/videos"

@@ -18,8 +18,31 @@ Endpoints:
 import os
 import re
 import shutil
+import subprocess
 
 from flask import Flask, jsonify, render_template_string, request
+
+
+def _samba_state():
+    """'on', 'off', or 'absent' (not installed / not set up)."""
+    try:
+        r = subprocess.run(["systemctl", "is-active", "smbd"],
+                           capture_output=True, text=True, timeout=5)
+        if r.stdout.strip() == "active":
+            return "on"
+        chk = subprocess.run(["systemctl", "list-unit-files", "smbd.service"],
+                             capture_output=True, text=True, timeout=5)
+        return "off" if "smbd.service" in chk.stdout else "absent"
+    except (OSError, subprocess.TimeoutExpired):
+        return "absent"
+
+
+def _samba_set(on):
+    verbs = ("start", "enable") if on else ("stop", "disable")
+    for verb in verbs:
+        subprocess.run(["sudo", "-n", "systemctl", verb, "smbd"],
+                       capture_output=True, timeout=15)
+    return _samba_state()
 
 PAGE = """<!doctype html>
 <html><head>
@@ -98,6 +121,13 @@ PAGE = """<!doctype html>
   </div>
   <div class="small" id="disk"></div>
 </div>
+<div class="panel">
+  <div class="row" style="align-items:center">
+    <label style="flex:1">Network share (Samba)</label>
+    <button id="samba" class="mini ghost" onclick="toggleSamba()">&hellip;</button>
+  </div>
+  <div class="small" id="sambamsg"></div>
+</div>
 <script>
 let filesData = {};
 async function post(url, body) {
@@ -165,6 +195,31 @@ async function renameFile(ch, name) {
   const n = prompt('Rename to:', name);
   if (n && n !== name) await post('/api/rename', {channel:ch, name:name, new_name:n});
 }
+let sambaState = 'absent';
+async function loadSamba() {
+  try {
+    const d = await (await fetch('/api/samba')).json();
+    sambaState = d.state;
+    const btn = document.getElementById('samba');
+    const msg = document.getElementById('sambamsg');
+    if (d.state === 'absent') {
+      btn.textContent = 'n/a';
+      msg.textContent = 'not set up — run setup_share.sh on the TV once';
+    } else {
+      btn.textContent = d.state === 'on' ? 'ON' : 'OFF';
+      btn.className = 'mini ' + (d.state === 'on' ? '' : 'alt');
+      msg.textContent = d.state === 'on'
+        ? 'visible as \\\\\\\\' + (d.host||'simpsonstv') + '\\\\videos' : 'share stopped';
+    }
+  } catch(e) {}
+}
+async function toggleSamba() {
+  if (sambaState === 'absent') return;
+  await fetch('/api/samba', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({enabled: sambaState !== 'on'})});
+  loadSamba();
+}
 async function mkChannel() {
   const n = document.getElementById('mkch').value.trim();
   if (n) { await post('/api/mkchannel', {name:n});
@@ -198,7 +253,7 @@ function upload() {
   };
   sendNext();
 }
-refresh(); loadFiles();
+refresh(); loadFiles(); loadSamba();
 setInterval(refresh, 3000);
 </script>
 </body></html>"""
@@ -265,6 +320,17 @@ def create_app(tv):
     def rescan():
         tv.channels.rescan()
         return jsonify(ok=True)
+
+    @app.get("/api/samba")
+    def samba_status():
+        import socket
+        return jsonify(state=_samba_state(), host=socket.gethostname())
+
+    @app.post("/api/samba")
+    def samba_toggle():
+        data = request.get_json(silent=True) or {}
+        state = _samba_set(bool(data.get("enabled")))
+        return jsonify(state=state)
 
     # -- file manager ------------------------------------------------------
 
