@@ -1,4 +1,4 @@
-# partition_card.ps1 — create the exFAT data partition on a freshly flashed
+# partition_card.ps1 - create the exFAT data partition on a freshly flashed
 # SD card, entirely from PowerShell. No diskpart, no Disk Management.
 #
 # Run AFTER flashing with Raspberry Pi Imager, BEFORE the Pi's first boot:
