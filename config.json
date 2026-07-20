@@ -7,8 +7,9 @@
     "swipe_px": 80,
     "long_press_s": 0.8,
     "seek_step": 30,
+    "overlay_s": 3.0,
     "gestures": {
-      "tap": "pause",
+      "tap": "overlay",
       "long_press": "power",
       "up": "channel_up",
       "down": "channel_down",

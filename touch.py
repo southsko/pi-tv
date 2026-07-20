@@ -3,14 +3,17 @@
 The panel registers as a normal Linux input device (evdev), so no special
 driver code is needed. Gestures (all configurable in config.json):
 
-    tap                 play / pause
+    tap                 show control overlay; taps while it's visible hit
+                        its zones (top=CH+, bottom=CH-, left/right=seek,
+                        center=pause)
     swipe up/down       next / previous channel (with static effect)
     swipe left/right    seek -30s / +30s
     long press          power toggle (backlight + amp + pause)
 
 Every gesture is remappable in config.json ("touch" -> "gestures") to any
-of: pause, power, channel_up, channel_down, volume_up, volume_down,
-next_episode, seek_fwd, seek_back, none.
+of: overlay, pause, power, channel_up, channel_down, volume_up,
+volume_down, next_episode, seek_fwd, seek_back, none. Set tap to "pause"
+if you'd rather tap-to-pause with no overlay.
 
 Runs in its own thread; does nothing gracefully if there is no touch
 device or python3-evdev is missing (e.g. desktop testing).
@@ -34,8 +37,9 @@ class TouchInput:
         self.swipe_px = int(cfg.get("swipe_px", 80))
         self.long_press_s = float(cfg.get("long_press_s", 0.8))
         self.seek_step = int(cfg.get("seek_step", 30))
+        self.overlay_s = float(cfg.get("overlay_s", 3.0))
         self.gestures = {
-            "tap": "pause",
+            "tap": "overlay",
             "long_press": "power",
             "up": "channel_up",
             "down": "channel_down",
@@ -44,6 +48,8 @@ class TouchInput:
         }
         self.gestures.update(cfg.get("gestures", {}))
         self.dev = None
+        self.max_x = self.max_y = 1
+        self._overlay_until = 0.0
 
     def _do(self, action):
         tv, vol_step = self.tv, 10
@@ -59,6 +65,37 @@ class TouchInput:
             "seek_back": lambda: tv.seek(-self.seek_step),
             "none": lambda: None,
         }.get(action, lambda: None)()
+
+    def _show_overlay(self):
+        self._overlay_until = time.time() + self.overlay_s
+        self.tv.show_overlay(self.overlay_s)
+
+    def _tap(self, x, y):
+        """A tap: open the overlay, or hit one of its zones if visible."""
+        if self.gestures["tap"] != "overlay":
+            self._do(self.gestures["tap"])
+            return
+        if time.time() > self._overlay_until:
+            self._show_overlay()
+            return
+        u, v = x / max(self.max_x, 1), y / max(self.max_y, 1)
+        if self.rotate == 90:
+            u, v = v, 1 - u
+        elif self.rotate == 180:
+            u, v = 1 - u, 1 - v
+        elif self.rotate == 270:
+            u, v = 1 - v, u
+        if v < 1 / 3:
+            self._do("channel_up")
+        elif v > 2 / 3:
+            self._do("channel_down")
+        elif u < 1 / 3:
+            self._do("seek_back")
+        elif u > 2 / 3:
+            self._do("seek_fwd")
+        else:
+            self._do("pause")
+        self._show_overlay()  # keep it up for chained taps
 
     def start(self):
         if not self.enabled:
@@ -102,6 +139,14 @@ class TouchInput:
                 time.sleep(2)
 
     def _read_loop(self):
+        # Learn the panel's coordinate range for overlay tap zones
+        caps = self.dev.capabilities()
+        for code, info in caps.get(ecodes.EV_ABS, []):
+            if code in (ecodes.ABS_X, ecodes.ABS_MT_POSITION_X):
+                self.max_x = info.max or 1
+            elif code in (ecodes.ABS_Y, ecodes.ABS_MT_POSITION_Y):
+                self.max_y = info.max or 1
+
         x = y = 0
         down_x = down_y = 0
         down_t = None
@@ -121,11 +166,11 @@ class TouchInput:
                     touching = False
                     if down_t is not None:
                         self._gesture(x - down_x, y - down_y,
-                                      time.time() - down_t)
+                                      time.time() - down_t, x, y)
 
     # -- gesture classification --------------------------------------------
 
-    def _gesture(self, dx, dy, duration):
+    def _gesture(self, dx, dy, duration, x=0, y=0):
         # Undo panel rotation so swipes match what the viewer sees
         if self.rotate == 90:
             dx, dy = dy, -dx
@@ -135,9 +180,10 @@ class TouchInput:
             dx, dy = -dy, dx
 
         if abs(dx) < self.swipe_px and abs(dy) < self.swipe_px:
-            self._do(self.gestures["long_press"]
-                     if duration >= self.long_press_s
-                     else self.gestures["tap"])
+            if duration >= self.long_press_s:
+                self._do(self.gestures["long_press"])
+            else:
+                self._tap(x, y)
         elif abs(dx) >= abs(dy):
             self._do(self.gestures["right" if dx > 0 else "left"])
         else:

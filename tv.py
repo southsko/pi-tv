@@ -69,15 +69,34 @@ class TV:
     def start(self):
         self.mpv.start()
         self.mpv.set("volume", self.channels.volume)
+        for prop, val in (("osd-align-x", "center"), ("osd-align-y", "center")):
+            try:
+                self.mpv.set(prop, val)
+            except MPVError:
+                pass
         self.hw.set_power(True)
         self.touch.start()
         self.next_episode()
 
-    def osd(self, text):
+    def osd(self, text, duration_ms=1500):
         try:
-            self.mpv.command("show-text", text)
+            self.mpv.command("show-text", text, duration_ms)
         except MPVError:
             pass
+
+    def show_overlay(self, seconds=3.0):
+        """Text 'remote control' card matching the touch tap zones."""
+        name = self.channels.current_channel_name() or "-"
+        card = ("      [ CH + ]      \n"
+                "\n"
+                "[<%ds]  [play/pause]  [%ds>]\n"
+                "\n"
+                "      [ CH - ]      \n"
+                "\n"
+                "ch: %s   hold: power"
+                % (self.cfg.get("touch", {}).get("seek_step", 30),
+                   self.cfg.get("touch", {}).get("seek_step", 30), name))
+        self.osd(card, int(seconds * 1000))
 
     # -- mpv events -----------------------------------------------------------
 
@@ -134,7 +153,7 @@ class TV:
         try:
             paused = not self.mpv.get("pause", False)
             self.mpv.set("pause", paused)
-            self.osd("⏸" if paused else "▶")
+            self.osd("|| paused" if paused else "> play")
         except MPVError:
             pass
 

@@ -60,10 +60,14 @@ which shows up as a normal Linux input device — so the TV itself is a remote:
 
 | Gesture | Default action |
 |---|---|
-| Tap | Play / pause |
+| Tap | Show control overlay; while visible, taps hit its zones: top = CH+, bottom = CH-, left/right = seek, center = pause |
 | Swipe up / down | Next / previous channel (with static effect) |
 | Swipe left / right | Seek -30s / +30s |
 | Long press (0.8s) | Power toggle |
+
+The overlay stays up for `overlay_s` seconds (default 3) and refreshes on each
+tap, so you can chain channel taps. Prefer plain tap-to-pause? Set
+`touch.gestures.tap` to `"pause"`.
 
 Every gesture is remappable in `config.json` (`touch.gestures`) to any of:
 `pause`, `power`, `channel_up`, `channel_down`, `volume_up`, `volume_down`,
