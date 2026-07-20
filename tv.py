@@ -31,8 +31,8 @@ DEFAULT_CONFIG = {
     "state_file": os.path.join(BASE, "state.json"),
     "web_port": 8080,
     "power_switch_mode": "toggle",
-    "pins": {"power_button": 26, "channel_button": 20,
-             "backlight": 19, "amp_enable": 18},
+    "pins": {"power_button": 26, "channel_button": None,
+             "backlight": 18, "audio_pwm": 19, "amp_enable": None},
     "mpv_args": ["--vo=gpu", "--gpu-context=drm", "--hwdec=auto-safe",
                  "--ao=alsa", "--panscan=1.0"]
 }

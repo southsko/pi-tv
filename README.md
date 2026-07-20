@@ -20,19 +20,38 @@ and adds channels, a channel-change static effect, and a web remote.
 
 ## Hardware
 
-Same electronics as the [original build guide](https://withrow.io/simpsons-tv-build-guide),
-but use a **Pi Zero 2 W**. Default wiring (BCM numbering, configurable in `config.json`):
+Same electronics as the [Waveshare build guide](https://withrow.io/simpsons-tv-build-guide-waveshare),
+but use a **Pi Zero 2 W**:
+
+- **Screen: [Waveshare 2.8" DPI LCD](https://www.waveshare.com/2.8inch-dpi-lcd.htm)**
+  (480×640 IPS, capacitive 5-point touch, sits directly on the 40-pin header —
+  no soldering). This is the screen the code is configured for out of the box;
+  `setup_screen.sh` (run automatically by `setup.sh`) installs the overlays and
+  config per the [Waveshare wiki](https://www.waveshare.com/wiki/2.8inch_DPI_LCD),
+  including touch and portrait rotation.
+- Adafruit Mono 2.5W amp (PAM8302) + 1.5" 4Ω speaker + 1K volume pot
+- Micro pushbutton for power, micro-USB breakout for the power jack
+- Enclosure STLs: [Thingiverse thing:4943159](https://www.thingiverse.com/thing:4943159)
+
+Wiring (BCM numbering — the DPI screen occupies nearly every GPIO, these are
+the only free ones, confirmed against the Waveshare pinout):
 
 | Pin | Function |
 |---|---|
 | GPIO 26 | Power button (to GND) |
-| GPIO 20 | Channel button (to GND) — new, optional |
-| GPIO 19 | Display backlight enable |
-| GPIO 18 | Audio amp enable/shutdown |
+| GPIO 18 | Screen backlight (driven high = on; screen's own control pin) |
+| GPIO 19 | PWM audio out — wire to the amp's audio in |
 
-Power button pauses playback and cuts the backlight + amp, like the original.
-If you use a slide switch instead of a pushbutton, set `"power_switch_mode": "switch"`
-in `config.json`.
+There is **no spare pin** for a channel button or amp-enable with this screen —
+channel changes are touch/web-remote territory. On other displays with free
+GPIOs you can set `channel_button` / `amp_enable` in `config.json` (null = off).
+
+Power button behavior: cuts the backlight, mutes audio (GPIO 19 to input),
+and pauses playback. Slide switch instead of pushbutton? Set
+`"power_switch_mode": "switch"`.
+
+Pi Zero 2 W note: if greys look green on this screen, run
+`ZERO_FIX=1 bash setup_screen.sh` (known quirk, Waveshare ships a fixed overlay).
 
 ## Install (the easy way)
 

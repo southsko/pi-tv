@@ -20,6 +20,18 @@ echo "=========================================="
 
 bash install.sh
 
+if [ -z "$SKIP_SCREEN" ]; then
+  if grep -q "pi-tv waveshare" /boot/firmware/config.txt /boot/config.txt 2>/dev/null; then
+    echo "==> Screen already configured"
+  else
+    read -r -p "Configure the Waveshare 2.8\" DPI touch screen? [Y/n] " a
+    if [ "$a" != "n" ] && [ "$a" != "N" ]; then
+      bash setup_screen.sh
+      NEED_REBOOT=1
+    fi
+  fi
+fi
+
 if [ -z "$SKIP_SAMBA" ]; then
   bash setup_share.sh
 else
@@ -50,3 +62,7 @@ echo "  Web remote:  http://$(hostname).local:8080"
 echo "  Net share:   \\\\$(hostname)\\videos"
 echo "  Logs:        journalctl -u simpsonstv -f"
 echo "=========================================="
+if [ -n "$NEED_REBOOT" ]; then
+  echo
+  echo ">>> Screen was just configured - REBOOT to bring it up:  sudo reboot"
+fi
