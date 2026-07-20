@@ -34,16 +34,22 @@ Power button pauses playback and cuts the backlight + amp, like the original.
 If you use a slide switch instead of a pushbutton, set `"power_switch_mode": "switch"`
 in `config.json`.
 
-## Install
+## Install (the easy way)
 
-1. Flash **Raspberry Pi OS Lite** (Trixie or Bookworm) with WiFi + SSH configured.
-2. Copy this folder to the Pi: `scp -r . pi@simpsonstv.local:~/simpsonstv`
-3. On the Pi:
+1. Flash **Raspberry Pi OS Lite** (Trixie or Bookworm) with WiFi + SSH configured
+   in the Imager. Boot it, SSH in.
+2. Run:
    ```bash
-   cd ~/simpsonstv
-   bash install.sh
+   sudo apt update && sudo apt install -y git
+   git clone https://github.com/southsko/pi-tv.git ~/pi-tv
+   cd ~/pi-tv && bash setup.sh
    ```
-4. Add episodes (each subfolder = one channel):
+   That's it — packages, static-effect clip, Samba share, systemd service, and
+   (if the card has one) the exFAT data partition, all set up and running.
+   Want the exFAT card-in-Windows option? Do the `prepare_card.ps1` step right
+   after flashing, *before* first boot — see "exFAT partition" below.
+   Skip parts with `SKIP_SAMBA=1 bash setup.sh` etc.
+3. Add episodes (each subfolder = one channel):
    ```
    videos/simpsons/S01E01.mp4
    videos/futurama/...
@@ -51,7 +57,9 @@ in `config.json`.
    ```
    For the Zero 2 W, encode to 480p H.264 for smooth playback:
    `ffmpeg -i in.mkv -vf scale=640:480 -c:v libx264 -profile:v high -level 4.0 -c:a aac out.mp4`
-5. `sudo systemctl start simpsonstv`
+
+The individual scripts (`install.sh`, `setup_share.sh`, `setup_exfat.sh`) can
+also be run on their own if you prefer piecemeal setup.
 
 ## Touchscreen
 
