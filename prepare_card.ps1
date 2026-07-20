@@ -1,4 +1,4 @@
-# prepare_card.ps1 — run on Windows AFTER flashing the SD card with
+# prepare_card.ps1 - run on Windows AFTER flashing the SD card with
 # Raspberry Pi Imager (with WiFi/SSH customization), BEFORE first boot.
 #
 #   Right-click -> Run with PowerShell   (or: powershell -ExecutionPolicy Bypass -File prepare_card.ps1)
