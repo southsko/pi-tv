@@ -104,10 +104,22 @@ keep it on your home LAN.
 
 ## exFAT partition (card readable in Windows)
 
-Order matters: the partition must be created **after flashing but before the
-Pi's first boot**. Pi OS normally expands its root partition to fill the card on
-first boot; an extra partition after root blocks that (the resize script only
-runs when root is the last partition), which is exactly what we want.
+Order matters: this must happen **after flashing but before the Pi's first
+boot**. Pi OS normally expands its root partition to fill the whole card on
+first boot — all or nothing, no size option — so we either block it or replace it.
+
+### Option A: automatic (recommended)
+
+1. Flash Raspberry Pi OS Lite with the Imager (set WiFi/SSH in its
+   customization — that's required, it generates the `firstrun.sh` we hook).
+2. With the card still in the PC, right-click `prepare_card.ps1` → Run with
+   PowerShell. It disables the built-in whole-card resize and makes the Pi's
+   own first boot cap the OS at 8 GB and carve the rest into a data partition.
+3. Boot the Pi, then run `bash install.sh && bash setup_exfat.sh` — the second
+   script formats the data partition as exFAT (label `PITV`) and mounts it as
+   the videos folder.
+
+### Option B: manual (diskpart)
 
 1. Flash Raspberry Pi OS Lite with the Imager (set WiFi/SSH), leave card in PC.
 2. Open an **admin** Command Prompt and run `diskpart`:

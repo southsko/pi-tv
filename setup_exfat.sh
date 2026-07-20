@@ -25,11 +25,17 @@ else
   echo "    no room to grow (already done) — fine."
 fi
 
-# 2. Find the exFAT partition
+# 2. Find the exFAT partition — or a raw, unformatted data partition
+#    (the prepare_card.ps1 first-boot route creates it unformatted)
 PART=$(sudo blkid -t TYPE=exfat -o device | grep "^$DEV" | head -1)
+if [ -z "$PART" ] && [ -b "${DEV}p3" ] && ! sudo blkid "${DEV}p3" >/dev/null 2>&1; then
+  echo "==> Found unformatted data partition ${DEV}p3 — formatting as exFAT..."
+  sudo mkfs.exfat -L PITV "${DEV}p3"
+  PART="${DEV}p3"
+fi
 if [ -z "$PART" ]; then
-  echo "!! No exFAT partition found on $DEV."
-  echo "   Create it from Windows first (README: 'exFAT partition')."
+  echo "!! No exFAT (or blank data) partition found on $DEV."
+  echo "   Create it first — README: 'exFAT partition' (diskpart or prepare_card.ps1)."
   exit 1
 fi
 UUID=$(sudo blkid -s UUID -o value "$PART")
