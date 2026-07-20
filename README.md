@@ -58,12 +58,17 @@ in `config.json`.
 The Waveshare 2.8" DPI panel used in the current build guide has capacitive touch,
 which shows up as a normal Linux input device — so the TV itself is a remote:
 
-| Gesture | Action |
+| Gesture | Default action |
 |---|---|
 | Tap | Play / pause |
-| Swipe left / right | Previous / next channel (with static effect) |
-| Swipe up / down | Volume up / down |
+| Swipe up / down | Next / previous channel (with static effect) |
+| Swipe left / right | Seek -30s / +30s |
 | Long press (0.8s) | Power toggle |
+
+Every gesture is remappable in `config.json` (`touch.gestures`) to any of:
+`pause`, `power`, `channel_up`, `channel_down`, `volume_up`, `volume_down`,
+`next_episode`, `seek_fwd`, `seek_back`, `none` — handy if you have the
+physical volume knob and want gestures for something else.
 
 Feedback appears as an on-screen OSD (channel name, volume). Configure in
 `config.json` under `touch` — set `rotate` to match your `display_rotate`

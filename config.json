@@ -5,7 +5,16 @@
     "enabled": true,
     "rotate": 90,
     "swipe_px": 80,
-    "long_press_s": 0.8
+    "long_press_s": 0.8,
+    "seek_step": 30,
+    "gestures": {
+      "tap": "pause",
+      "long_press": "power",
+      "up": "channel_up",
+      "down": "channel_down",
+      "left": "seek_back",
+      "right": "seek_fwd"
+    }
   },
   "pins": {
     "power_button": 26,

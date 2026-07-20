@@ -157,6 +157,15 @@ class TV:
             self.osd("ch %d  %s" % (self.channels.index + 1, name))
             self._tune()
 
+    def seek(self, seconds):
+        if self.playing_static:
+            return
+        try:
+            self.mpv.command("seek", seconds, "relative")
+            self.osd("%+ds" % seconds)
+        except MPVError:
+            pass
+
     def set_volume(self, volume):
         vol = self.channels.set_volume(volume)
         try:

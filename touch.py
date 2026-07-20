@@ -4,9 +4,13 @@ The panel registers as a normal Linux input device (evdev), so no special
 driver code is needed. Gestures (all configurable in config.json):
 
     tap                 play / pause
-    swipe left/right    previous / next channel (with static effect)
-    swipe up/down       volume up / down
+    swipe up/down       next / previous channel (with static effect)
+    swipe left/right    seek -30s / +30s
     long press          power toggle (backlight + amp + pause)
+
+Every gesture is remappable in config.json ("touch" -> "gestures") to any
+of: pause, power, channel_up, channel_down, volume_up, volume_down,
+next_episode, seek_fwd, seek_back, none.
 
 Runs in its own thread; does nothing gracefully if there is no touch
 device or python3-evdev is missing (e.g. desktop testing).
@@ -29,7 +33,32 @@ class TouchInput:
         self.rotate = int(cfg.get("rotate", 0)) % 360
         self.swipe_px = int(cfg.get("swipe_px", 80))
         self.long_press_s = float(cfg.get("long_press_s", 0.8))
+        self.seek_step = int(cfg.get("seek_step", 30))
+        self.gestures = {
+            "tap": "pause",
+            "long_press": "power",
+            "up": "channel_up",
+            "down": "channel_down",
+            "left": "seek_back",
+            "right": "seek_fwd",
+        }
+        self.gestures.update(cfg.get("gestures", {}))
         self.dev = None
+
+    def _do(self, action):
+        tv, vol_step = self.tv, 10
+        {
+            "pause": tv.toggle_pause,
+            "power": tv.toggle_power,
+            "channel_up": lambda: tv.change_channel(1),
+            "channel_down": lambda: tv.change_channel(-1),
+            "volume_up": lambda: tv.set_volume(tv.channels.volume + vol_step),
+            "volume_down": lambda: tv.set_volume(tv.channels.volume - vol_step),
+            "next_episode": tv.next_episode,
+            "seek_fwd": lambda: tv.seek(self.seek_step),
+            "seek_back": lambda: tv.seek(-self.seek_step),
+            "none": lambda: None,
+        }.get(action, lambda: None)()
 
     def start(self):
         if not self.enabled:
@@ -106,14 +135,10 @@ class TouchInput:
             dx, dy = -dy, dx
 
         if abs(dx) < self.swipe_px and abs(dy) < self.swipe_px:
-            if duration >= self.long_press_s:
-                self.tv.toggle_power()
-            else:
-                self.tv.toggle_pause()
-            return
-
-        if abs(dx) >= abs(dy):
-            self.tv.change_channel(1 if dx > 0 else -1)
+            self._do(self.gestures["long_press"]
+                     if duration >= self.long_press_s
+                     else self.gestures["tap"])
+        elif abs(dx) >= abs(dy):
+            self._do(self.gestures["right" if dx > 0 else "left"])
         else:
-            step = -10 if dy > 0 else 10  # swipe up = louder
-            self.tv.set_volume(self.tv.channels.volume + step)
+            self._do(self.gestures["down" if dy > 0 else "up"])
