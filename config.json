@@ -28,7 +28,7 @@
     "--profile=fast",
     "--vo=gpu",
     "--gpu-context=drm",
-    "--hwdec=auto-safe",
+    "--hwdec=v4l2m2m-copy",
     "--ao=alsa",
     "--panscan=1.0",
     "--video-rotate=90"
