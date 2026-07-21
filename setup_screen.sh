@@ -48,6 +48,8 @@ dtoverlay=waveshare-touch-28dpi
 dtoverlay=vc4-kms-dpi-2inch8
 dtparam=audio=on
 dtoverlay=audremap,enable_jack,pins_18_19
+# keep backlight off during boot; the TV service turns it on when ready
+gpio=18=op,dl
 # --- end pi-tv ---
 EOF
 else
