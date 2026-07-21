@@ -79,8 +79,30 @@ class TV:
         self.next_episode()
 
     def osd(self, text, duration_ms=1500):
+        """OSD via ASS overlay so it can rotate with the video.
+
+        mpv renders normal OSD aligned to the physical (portrait) panel;
+        we counter-rotate the text to match --video-rotate. osd_rotate in
+        config.json should equal the --video-rotate value (90 default).
+        """
+        rot = int(self.cfg.get("osd_rotate", 90)) % 360
+        frz = (360 - rot) % 360  # ASS \frz is counter-clockwise
+        size = int(self.cfg.get("osd_font_size", 36))
+        data = ("{\\an5\\pos(360,240)\\frz%d\\fs%d\\bord2}%s"
+                % (frz, size, text.replace("\n", "\\N")))
         try:
-            self.mpv.command("show-text", text, duration_ms)
+            self.mpv.command("osd-overlay", 63, "ass-events", data)
+        except MPVError:
+            return
+        if getattr(self, "_osd_timer", None):
+            self._osd_timer.cancel()
+        self._osd_timer = threading.Timer(duration_ms / 1000.0, self._osd_clear)
+        self._osd_timer.daemon = True
+        self._osd_timer.start()
+
+    def _osd_clear(self):
+        try:
+            self.mpv.command("osd-overlay", 63, "none", "")
         except MPVError:
             pass
 
