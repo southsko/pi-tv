@@ -54,9 +54,18 @@ else
   echo "==> config.txt already configured, skipping"
 fi
 
-if [ ! -f /etc/asound.conf ]; then
+if ! grep -q 'hw:Headphones' /etc/asound.conf 2>/dev/null; then
   echo "==> Pointing ALSA default output at the PWM audio (Headphones card)..."
-  printf 'defaults.pcm.card "Headphones"\ndefaults.ctl.card "Headphones"\n' | sudo tee /etc/asound.conf >/dev/null
+  sudo tee /etc/asound.conf >/dev/null <<'ALSAEOF'
+pcm.!default {
+  type plug
+  slave.pcm "hw:Headphones"
+}
+ctl.!default {
+  type hw
+  card Headphones
+}
+ALSAEOF
 fi
 
 if ! grep -q "video=DPI-1" "$BOOT/cmdline.txt"; then
