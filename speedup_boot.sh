@@ -20,6 +20,13 @@ for svc in bluetooth hciuart ModemManager cups cups-browsed triggerhappy \
   sudo systemctl disable --now "$svc" 2>/dev/null && echo "    off: $svc" || true
 done
 
+echo "==> Disabling WiFi power-save (fixes laggy/dropping SSH on Zero W)..."
+sudo tee /etc/NetworkManager/conf.d/wifi-powersave.conf >/dev/null <<EOF
+[connection]
+wifi.powersave = 2
+EOF
+sudo systemctl restart NetworkManager 2>/dev/null || true
+
 echo "==> Firmware boot tweaks (config.txt)..."
 if ! grep -q "# pi-tv fastboot" "$BOOT/config.txt"; then
   sudo tee -a "$BOOT/config.txt" >/dev/null <<EOF
