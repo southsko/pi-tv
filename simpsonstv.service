@@ -1,6 +1,6 @@
 [Unit]
 Description=Simpsons TV (mpv player, GPIO buttons, web remote)
-After=network.target sound.target
+After=local-fs.target
 
 [Service]
 Type=simple

@@ -205,3 +205,7 @@ no-ops and mpv opens a window. Handy for testing channels and the web UI.
 - Backlight doesn't switch: your display may use a different enable pin; adjust
   `pins.backlight`.
 - Logs: `journalctl -u simpsonstv -f`
+- Slow boot: run `bash speedup_boot.sh` (disables bluetooth/printing/etc.,
+  firmware boot tweaks, starts the player before the network is up). The Lite
+  image boots much faster than Desktop to begin with. Profile stragglers with
+  `systemd-analyze blame`.

@@ -1,0 +1,37 @@
+#!/bin/bash
+# Boot-time diet for the TV. Run ON the Pi:  bash speedup_boot.sh
+# Then: sudo reboot.  Diagnose leftovers with: systemd-analyze blame | head -15
+set -e
+
+BOOT=/boot/firmware
+[ -d "$BOOT" ] || BOOT=/boot
+
+echo "==> Disabling services a TV does not need..."
+# Kept on purpose: NetworkManager (WiFi), avahi (simpsonstv.local), ssh, smbd.
+for svc in bluetooth hciuart ModemManager cups cups-browsed triggerhappy \
+           NetworkManager-wait-online systemd-networkd-wait-online \
+           raspi-config keyboard-setup; do
+  sudo systemctl disable --now "$svc" 2>/dev/null && echo "    off: $svc" || true
+done
+
+echo "==> Firmware boot tweaks (config.txt)..."
+if ! grep -q "# pi-tv fastboot" "$BOOT/config.txt"; then
+  sudo tee -a "$BOOT/config.txt" >/dev/null <<EOF
+
+# pi-tv fastboot
+disable_splash=1
+boot_delay=0
+dtoverlay=disable-bt
+EOF
+fi
+
+echo "==> Quieting the console (cmdline.txt)..."
+grep -q " quiet" "$BOOT/cmdline.txt" || sudo sed -i 's/$/ quiet loglevel=3 logo.nologo/' "$BOOT/cmdline.txt"
+
+echo "==> Making the TV service start as early as possible..."
+sudo sed -i 's/^After=.*/After=local-fs.target/' /etc/systemd/system/simpsonstv.service
+sudo systemctl daemon-reload
+
+echo
+echo "Done. sudo reboot and time it."
+echo "Still slow? Run: systemd-analyze blame | head -15  and investigate the top items."
