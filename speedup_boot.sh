@@ -6,6 +6,12 @@ set -e
 BOOT=/boot/firmware
 [ -d "$BOOT" ] || BOOT=/boot
 
+echo "==> Making sure no desktop fights the TV for the screen..."
+if [ "$(systemctl get-default)" = "graphical.target" ]; then
+  sudo systemctl set-default multi-user.target
+fi
+sudo systemctl disable lightdm 2>/dev/null || true
+
 echo "==> Disabling services a TV does not need..."
 # Kept on purpose: NetworkManager (WiFi), avahi (simpsonstv.local), ssh, smbd.
 for svc in bluetooth hciuart ModemManager cups cups-browsed triggerhappy \
