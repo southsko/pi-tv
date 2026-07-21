@@ -33,7 +33,7 @@ DEFAULT_CONFIG = {
     "power_switch_mode": "toggle",
     "pins": {"power_button": 26, "channel_button": None,
              "backlight": 18, "audio_pwm": 19, "amp_enable": None},
-    "mpv_args": ["--vo=gpu", "--gpu-context=drm", "--hwdec=auto-safe",
+    "mpv_args": ["--profile=fast", "--vo=gpu", "--gpu-context=drm", "--hwdec=auto-safe",
                  "--ao=alsa", "--panscan=1.0", "--video-rotate=90"]
 }
 

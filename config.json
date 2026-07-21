@@ -24,5 +24,13 @@
     "audio_pwm": 19,
     "amp_enable": null
   },
-  "mpv_args": ["--vo=gpu", "--gpu-context=drm", "--hwdec=auto-safe", "--ao=alsa", "--panscan=1.0", "--video-rotate=90"]
+  "mpv_args": [
+    "--profile=fast",
+    "--vo=gpu",
+    "--gpu-context=drm",
+    "--hwdec=auto-safe",
+    "--ao=alsa",
+    "--panscan=1.0",
+    "--video-rotate=90"
+  ]
 }
