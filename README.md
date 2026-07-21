@@ -194,6 +194,12 @@ no-ops and mpv opens a window. Handy for testing channels and the web UI.
 
 ## Troubleshooting
 
+- Video sideways/portrait: the panel is natively portrait; mpv rotates it with
+  `--video-rotate=90` in `config.json`'s `mpv_args`. Upside down? Use `270`
+  (and flip `touch.rotate` to `270` to match).
+- No sound: check `aplay -l` shows a `Headphones` card; `/etc/asound.conf` must
+  point defaults at it (setup_screen.sh does this). The audremap overlay needs
+  `enable_jack`.
 - Black screen but audio plays: check `mpv_args` in `config.json`. On some display
   setups `--vo=drm` works better than `--vo=gpu --gpu-context=drm`.
 - Backlight doesn't switch: your display may use a different enable pin; adjust

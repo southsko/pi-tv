@@ -47,11 +47,16 @@ dtoverlay=waveshare-28dpi-4b
 dtoverlay=waveshare-touch-28dpi
 dtoverlay=vc4-kms-dpi-2inch8
 dtparam=audio=on
-dtoverlay=audremap,pins_18_19
+dtoverlay=audremap,enable_jack,pins_18_19
 # --- end pi-tv ---
 EOF
 else
   echo "==> config.txt already configured, skipping"
+fi
+
+if [ ! -f /etc/asound.conf ]; then
+  echo "==> Pointing ALSA default output at the PWM audio (Headphones card)..."
+  printf 'defaults.pcm.card Headphones\ndefaults.ctl.card Headphones\n' | sudo tee /etc/asound.conf >/dev/null
 fi
 
 if ! grep -q "video=DPI-1" "$BOOT/cmdline.txt"; then
