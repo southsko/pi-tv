@@ -34,7 +34,7 @@ DEFAULT_CONFIG = {
     "pins": {"power_button": 26, "channel_button": None,
              "backlight": 18, "audio_pwm": 19, "amp_enable": None},
     "mpv_args": ["--profile=fast", "--vo=gpu", "--gpu-context=drm", "--hwdec=v4l2m2m-copy",
-                 "--ao=alsa", "--panscan=1.0", "--video-rotate=90"]
+                 "--ao=alsa", "--panscan=1.0", "--video-rotate=270"]
 }
 
 

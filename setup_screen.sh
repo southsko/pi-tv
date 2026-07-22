@@ -72,7 +72,7 @@ fi
 
 if ! grep -q "video=DPI-1" "$BOOT/cmdline.txt"; then
   echo "==> Setting portrait rotation in cmdline.txt..."
-  sudo sed -i '1s|^|video=DPI-1:480x640M@60,rotate=90 |' "$BOOT/cmdline.txt"
+  sudo sed -i '1s|^|video=DPI-1:480x640M@60,rotate=270 |' "$BOOT/cmdline.txt"
 else
   echo "==> cmdline.txt already has DPI rotation, skipping"
 fi

@@ -1,11 +1,11 @@
 {
   "web_port": 8080,
   "power_switch_mode": "toggle",
-  "osd_rotate": 90,
+  "osd_rotate": 270,
   "osd_font_size": 36,
   "touch": {
     "enabled": true,
-    "rotate": 90,
+    "rotate": 270,
     "swipe_px": 80,
     "long_press_s": 0.8,
     "seek_step": 30,
@@ -33,6 +33,6 @@
     "--hwdec=v4l2m2m-copy",
     "--ao=alsa",
     "--panscan=1.0",
-    "--video-rotate=90"
+    "--video-rotate=270"
   ]
 }
