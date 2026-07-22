@@ -12,11 +12,13 @@
     "overlay_s": 3.0,
     "gestures": {
       "tap": "overlay",
-      "long_press": "power",
       "up": "channel_up",
       "down": "channel_down",
       "left": "seek_back",
-      "right": "seek_fwd"
+      "right": "seek_fwd",
+      "long_press": "none",
+      "hold_right": "next_episode",
+      "hold_center": "power"
     }
   },
   "pins": {

@@ -40,11 +40,13 @@ class TouchInput:
         self.overlay_s = float(cfg.get("overlay_s", 3.0))
         self.gestures = {
             "tap": "overlay",
-            "long_press": "power",
             "up": "channel_up",
             "down": "channel_down",
             "left": "seek_back",
             "right": "seek_fwd",
+            "long_press": "none",       # fallback for hold zones not set below
+            "hold_right": "next_episode",   # hold right = skip episode
+            "hold_center": "power",         # hold center = power
         }
         self.gestures.update(cfg.get("gestures", {}))
         self.dev = None
@@ -70,14 +72,8 @@ class TouchInput:
         self._overlay_until = time.time() + self.overlay_s
         self.tv.show_overlay(self.overlay_s)
 
-    def _tap(self, x, y):
-        """A tap: open the overlay, or hit one of its zones if visible."""
-        if self.gestures["tap"] != "overlay":
-            self._do(self.gestures["tap"])
-            return
-        if time.time() > self._overlay_until:
-            self._show_overlay()
-            return
+    def _zone(self, x, y):
+        """Which screen third the touch landed in, accounting for rotation."""
         u, v = x / max(self.max_x, 1), y / max(self.max_y, 1)
         if self.rotate == 90:
             u, v = v, 1 - u
@@ -86,16 +82,34 @@ class TouchInput:
         elif self.rotate == 270:
             u, v = 1 - v, u
         if v < 1 / 3:
-            self._do("channel_up")
-        elif v > 2 / 3:
-            self._do("channel_down")
-        elif u < 1 / 3:
-            self._do("seek_back")
-        elif u > 2 / 3:
-            self._do("seek_fwd")
-        else:
-            self._do("pause")
+            return "top"
+        if v > 2 / 3:
+            return "bottom"
+        if u < 1 / 3:
+            return "left"
+        if u > 2 / 3:
+            return "right"
+        return "center"
+
+    def _tap(self, x, y):
+        """A tap: open the overlay, or hit one of its zones if visible."""
+        if self.gestures["tap"] != "overlay":
+            self._do(self.gestures["tap"])
+            return
+        if time.time() > self._overlay_until:
+            self._show_overlay()
+            return
+        self._do({"top": "channel_up", "bottom": "channel_down",
+                  "left": "seek_back", "right": "seek_fwd",
+                  "center": "pause"}[self._zone(x, y)])
         self._show_overlay()  # keep it up for chained taps
+
+    def _hold(self, x, y):
+        """A long press: zone-aware. Falls back to the global long_press."""
+        zone = self._zone(x, y)
+        action = self.gestures.get("hold_" + zone) \
+            or self.gestures.get("long_press", "none")
+        self._do(action)
 
     def start(self):
         if not self.enabled:
@@ -181,7 +195,7 @@ class TouchInput:
 
         if abs(dx) < self.swipe_px and abs(dy) < self.swipe_px:
             if duration >= self.long_press_s:
-                self._do(self.gestures["long_press"])
+                self._hold(x, y)
             else:
                 self._tap(x, y)
         elif abs(dx) >= abs(dy):

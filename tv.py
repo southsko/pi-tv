@@ -202,7 +202,14 @@ class TV:
         if self.playing_static:
             return
         try:
-            self.mpv.command("seek", seconds, "relative")
+            # clamp to within the file so seeking past the end can't fire an
+            # end-of-file event and yank us into the next episode unexpectedly
+            pos = self.mpv.get("time-pos") or 0
+            dur = self.mpv.get("duration")
+            target = pos + seconds
+            if dur:
+                target = max(0, min(target, dur - 1))
+            self.mpv.command("seek", target, "absolute")
             self.osd("%+ds" % seconds)
         except MPVError:
             pass
