@@ -45,7 +45,7 @@ class TouchInput:
             "left": "seek_back",
             "right": "seek_fwd",
             "long_press": "none",       # fallback for hold zones not set below
-            "hold_right": "next_episode",   # hold right = skip episode
+            "hold_right": "skip",           # hold right = skip (with static)
             "hold_center": "power",         # hold center = power
         }
         self.gestures.update(cfg.get("gestures", {}))
@@ -63,6 +63,7 @@ class TouchInput:
             "volume_up": lambda: tv.set_volume(tv.channels.volume + vol_step),
             "volume_down": lambda: tv.set_volume(tv.channels.volume - vol_step),
             "next_episode": tv.next_episode,
+            "skip": tv.skip,
             "seek_fwd": lambda: tv.seek(self.seek_step),
             "seek_back": lambda: tv.seek(-self.seek_step),
             "none": lambda: None,

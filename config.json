@@ -1,5 +1,6 @@
 {
   "web_port": 8080,
+  "static_volume": 40,
   "power_switch_mode": "toggle",
   "osd_rotate": 270,
   "osd_font_size": 36,
@@ -17,7 +18,7 @@
       "left": "seek_back",
       "right": "seek_fwd",
       "long_press": "none",
-      "hold_right": "next_episode",
+      "hold_right": "skip",
       "hold_center": "power"
     }
   },

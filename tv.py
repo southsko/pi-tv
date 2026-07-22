@@ -30,6 +30,7 @@ DEFAULT_CONFIG = {
     "static_clip": os.path.join(BASE, "static.mp4"),
     "state_file": os.path.join(BASE, "state.json"),
     "web_port": 8080,
+    "static_volume": 40,
     "power_switch_mode": "toggle",
     "pins": {"power_button": 26, "channel_button": None,
              "backlight": 18, "audio_pwm": 19, "amp_enable": None},
@@ -143,6 +144,10 @@ class TV:
             self.current_file = path
         try:
             self.mpv.loadfile(path)
+            # static plays quieter than programming
+            vol = (self.cfg.get("static_volume", 40) if is_static
+                   else self.channels.volume)
+            self.mpv.set("volume", vol)
         except MPVError as e:
             print("[tv] loadfile failed: %s" % e)
 
@@ -159,10 +164,15 @@ class TV:
         self._play(ep)
 
     def next_episode(self):
+        """Instant next episode, no static (used at startup / natural end)."""
         self._play_next_episode()
 
+    def skip(self):
+        """User-initiated skip: play the static transition, then next ep."""
+        self._tune()
+
     def _tune(self):
-        """Channel changed: show static, then first episode of new channel."""
+        """Show static, then the next episode (channel change or skip)."""
         static = self.cfg.get("static_clip")
         if static and os.path.exists(static):
             self._play(static, is_static=True)
