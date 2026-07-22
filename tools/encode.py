@@ -6,13 +6,13 @@ folder full of source videos and run:
 
     python3 encode.py
 
-Every video in this folder AND all subfolders is re-encoded into ./encoded/,
-mirroring the folder structure — so Season 1/, Season 2/, ... come out as
-matching subfolders you can drop straight into videos/ as channels. Output is
-H.264 baseline 480p with stereo AAC audio — the format the Pi's hardware
-decoder (v4l2m2m) plays smoothly.
+Every video in this folder AND all subfolders (Season 1/, Season 2/, ...) is
+re-encoded into a single flat ./encoded/ folder. Output is H.264 baseline 480p
+with stereo AAC audio — the format the Pi's hardware decoder (v4l2m2m) plays
+smoothly. Copy encoded/ into one channel folder (videos/<channel>/).
 
-Anything with "sample" in the file or folder name is skipped.
+Anything with "sample" in the file or folder name is skipped. If two files in
+different folders share a name, the later one gets a numeric suffix.
 
 Options (env vars):
     HEIGHT=480     output height in pixels (width auto, keeps aspect)
@@ -66,18 +66,24 @@ def main():
           % (len(sources), dest))
     ok, failed, skipped = 0, 0, 0
 
+    done_names = set()
     for src in sorted(sources):
-        # mirror the source's relative folder path into encoded/
-        rel = os.path.relpath(src, directory)
-        rel_out = os.path.splitext(rel)[0] + ".mp4"
-        out = os.path.join(dest, rel_out)
-        os.makedirs(os.path.dirname(out), exist_ok=True)
+        base = os.path.splitext(os.path.basename(src))[0]
+        name = base + ".mp4"
+        # flat output; if two folders hold the same filename, suffix later ones
+        if name in done_names:
+            n = 2
+            while ("%s (%d).mp4" % (base, n)) in done_names:
+                n += 1
+            name = "%s (%d).mp4" % (base, n)
+        out = os.path.join(dest, name)
+        done_names.add(name)
         if os.path.isfile(out):
-            print("skip (exists): %s" % rel_out)
+            print("skip (exists): %s" % name)
             skipped += 1
             continue
 
-        print("Encoding: %s" % rel_out)
+        print("Encoding: %s" % name)
         cmd = [
             "ffmpeg", "-y", "-i", src,
             "-vf", "scale=-2:%s" % HEIGHT,
