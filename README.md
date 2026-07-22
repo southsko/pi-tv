@@ -74,8 +74,11 @@ Pi Zero 2 W note: if greys look green on this screen, run
    videos/futurama/...
    videos/commercials/...
    ```
-   For the Zero 2 W, encode to 480p H.264 for smooth playback:
-   `ffmpeg -i in.mkv -vf scale=640:480 -c:v libx264 -profile:v high -level 4.0 -c:a aac out.mp4`
+   Encode to 480p H.264 baseline for smooth hardware-decoded playback. Easiest
+   way: drop `tools/encode.py` into a folder of source videos **on your PC**
+   (never the Pi — too slow) and run `python3 encode.py`; results land in
+   `./encoded/`, ready to copy into channel folders. Or by hand:
+   `ffmpeg -i in.mkv -vf scale=-2:480 -c:v libx264 -profile:v baseline -level 3.0 -c:a aac -ac 2 out.mp4`
 
 The individual scripts (`install.sh`, `setup_share.sh`, `setup_exfat.sh`) can
 also be run on their own if you prefer piecemeal setup.
