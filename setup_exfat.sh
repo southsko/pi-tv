@@ -11,19 +11,26 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 VIDEOS="$DIR/videos"
 DEV=/dev/mmcblk0
 
-echo "==> Installing exFAT + partition tools..."
-sudo apt update
-sudo apt install -y exfatprogs cloud-guest-utils
-
 # 1. Grow the OS root partition into the gap left before the exFAT
 #    partition (first-boot auto-expand was blocked by the exFAT partition).
+#    Done FIRST, with parted (always present) so it works even when the
+#    card is full and apt can't run. Grows p2 up to just before p3.
 echo "==> Growing root partition into the reserved gap (if any)..."
-if sudo growpart "$DEV" 2; then
+P3_START=$(sudo parted -m "$DEV" unit s print 2>/dev/null \
+           | awk -F: '/^3:/{sub(/s/,"",$2);print $2}')
+P2_END=$(sudo parted -m "$DEV" unit s print 2>/dev/null \
+         | awk -F: '/^2:/{sub(/s/,"",$3);print $3}')
+if [ -n "$P3_START" ] && [ -n "$P2_END" ] && [ "$((P3_START-1))" -gt "$P2_END" ]; then
+  sudo parted -m "$DEV" unit s resizepart 2 "$((P3_START-1))"
   sudo resize2fs "${DEV}p2"
   echo "    root filesystem grown."
 else
-  echo "    no room to grow (already done) — fine."
+  echo "    root already fills its reserved space — fine."
 fi
+
+echo "==> Installing exFAT tools..."
+sudo apt update
+sudo apt install -y exfatprogs
 
 # 2. Find the exFAT partition — or a raw, unformatted data partition
 #    (the prepare_card.ps1 first-boot route creates it unformatted)
