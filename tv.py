@@ -89,7 +89,9 @@ class TV:
         rot = int(self.cfg.get("osd_rotate", 90)) % 360
         frz = (360 - rot) % 360  # ASS \frz is counter-clockwise
         size = int(self.cfg.get("osd_font_size", 36))
-        data = ("{\\an5\\pos(360,240)\\frz%d\\fs%d\\bord2}%s"
+        # \an5 alone centres on the frame at any resolution — no hardcoded
+        # \pos (that was off-centre because it assumed a fixed OSD size)
+        data = ("{\\an5\\frz%d\\fs%d\\bord2}%s"
                 % (frz, size, text.replace("\n", "\\N")))
         try:
             self.mpv.command("osd-overlay", 63, "ass-events", data)
