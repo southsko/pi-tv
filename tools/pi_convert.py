@@ -256,6 +256,37 @@ def interactive_pick_dir(start):
     return curses.wrapper(_curses_selector, start, True)
 
 
+# ── native GUI picker (tkinter — bundled with Python, best on Windows) ────────
+def gui_select():
+    """Return (files, out_dir) via native dialogs, or (None, None) if cancelled
+    or GUI unavailable."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except Exception:
+        return None, None
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+    except Exception:
+        return None, None
+    files = filedialog.askopenfilenames(
+        title="Select videos to convert (Ctrl/Shift-click for many)",
+        filetypes=[("Video files",
+                    "*.mp4 *.mkv *.mov *.avi *.m4v *.webm *.flv *.wmv"),
+                   ("All files", "*.*")])
+    if not files:
+        root.destroy()
+        return None, None
+    default_out = os.environ.get("PI_TV_OUT") or _output_dir(list(files))
+    out = filedialog.askdirectory(
+        title="Select OUTPUT folder (Cancel = default 'encoded')",
+        initialdir=os.path.dirname(default_out) or os.getcwd())
+    root.destroy()
+    return list(files), (out or default_out)
+
+
 def choose_output(default):
     """Let the user keep the default, paste a path, or browse to a folder."""
     print()
@@ -366,14 +397,25 @@ def run_convert(selected, out_dir):
     div()
 
 
-if __name__ == "__main__":
+def main():
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     if not HAS_COLOR:
         print("[NOTE] pip install colorama  for coloured output")
     print(BANNER)
-    input(f"{Fore.YELLOW}  Press ENTER to open the file browser...{Style.RESET_ALL}  ")
 
-    selected = interactive_select(find_video_files())
+    use_tui = os.environ.get("PI_TV_TUI")   # set to force the text/curses browser
+    selected, out_dir = (None, None)
+
+    if not use_tui:
+        selected, out_dir = gui_select()    # native dialogs (Windows-friendly)
+
+    if selected is None:                    # GUI unavailable/cancelled → browser
+        input(f"{Fore.YELLOW}  Press ENTER to open the file browser...{Style.RESET_ALL}  ")
+        selected = interactive_select(find_video_files())
+        if selected:
+            default_out = os.environ.get("PI_TV_OUT") or _output_dir(selected)
+            out_dir = choose_output(os.path.abspath(default_out))
+
     print(BANNER)
     if not selected:
         warn("Nothing selected — nothing to do.")
@@ -381,9 +423,11 @@ if __name__ == "__main__":
         info(f"{len(selected)} clip(s) selected:")
         for f in selected:
             print(f"  {Fore.WHITE}→  {os.path.basename(f)}{Style.RESET_ALL}")
-        default_out = os.environ.get("PI_TV_OUT") or _output_dir(selected)
-        out_dir = choose_output(os.path.abspath(default_out))
         run_convert(selected, out_dir)
 
     print(); div()
     input(f"{Fore.GREEN}✅  Done. Press ENTER to exit...{Style.RESET_ALL}  ")
+
+
+if __name__ == "__main__":
+    main()
