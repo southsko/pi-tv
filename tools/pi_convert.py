@@ -413,7 +413,7 @@ def _convert_one(src, out, label):
         errf.close()
         raise
 
-    cur = 0.0
+    cur, fps, speed = 0.0, 0.0, 0.0
     for line in proc.stdout:
         line = line.strip()
         if line.startswith('out_time='):
@@ -423,11 +423,30 @@ def _convert_one(src, out, label):
                 cur = int(hh) * 3600 + int(mm) * 60 + float(ss)
             except ValueError:
                 pass
+        elif line.startswith('fps='):
+            try:
+                fps = float(line.split('=', 1)[1])
+            except ValueError:
+                pass
+        elif line.startswith('speed='):
+            try:
+                speed = float(line.split('=', 1)[1].rstrip('x'))
+            except ValueError:
+                pass
+        elif not line.startswith('progress='):
+            continue  # only redraw on the last key of each progress block
+
+        rate = "%4.0ffps" % fps if fps else "  --fps"
         if dur > 0:
             frac = cur / dur
-            msg = "  %s  %s %3d%%" % (label, _bar(frac), int(frac * 100))
+            eta = ""
+            if speed > 0:
+                secs = int((dur - cur) / speed)
+                eta = "  ETA %d:%02d" % (secs // 60, secs % 60)
+            msg = "  %s  %s %3d%%  %s  %.1fx%s" % (
+                label, _bar(frac), int(frac * 100), rate, speed, eta)
         else:
-            msg = "  %s  %ds elapsed" % (label, int(cur))
+            msg = "  %s  %ds  %s  %.1fx" % (label, int(cur), rate, speed)
         sys.stdout.write("\r" + msg[:100].ljust(100))
         sys.stdout.flush()
     proc.wait()
