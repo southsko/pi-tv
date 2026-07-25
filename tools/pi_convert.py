@@ -30,40 +30,65 @@ _CPU_VARGS = ['-c:v', 'libx264', '-profile:v', 'baseline', '-level', '3.0',
               '-preset', PRESET, '-crf', CRF, '-pix_fmt', 'yuv420p']
 
 
-def _encoder_works(vargs):
-    """True if ffmpeg can actually encode with these args (real GPU present)."""
+def _encoder_listed(codec):
+    """Is this encoder compiled into the ffmpeg on PATH at all?"""
     try:
-        r = subprocess.run(
-            ['ffmpeg', '-hide_banner', '-f', 'lavfi', '-i',
-             'color=c=black:s=64x64:d=0.1'] + vargs
-            + ['-f', 'null', '-'],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
-        return r.returncode == 0
+        r = subprocess.run(['ffmpeg', '-hide_banner', '-encoders'],
+                           capture_output=True, text=True, timeout=15)
+        return codec in r.stdout
     except (OSError, subprocess.TimeoutExpired):
         return False
+
+
+def _encoder_works(vargs):
+    """Return (ok, last_error_line) from a tiny real test encode."""
+    try:
+        # 320x240 (not 64x64 — NVENC has a minimum frame size and rejects tiny)
+        r = subprocess.run(
+            ['ffmpeg', '-hide_banner', '-f', 'lavfi', '-i',
+             'color=c=black:s=320x240:d=0.3'] + vargs
+            + ['-f', 'null', '-'],
+            capture_output=True, text=True, timeout=25)
+        if r.returncode == 0:
+            return True, ""
+        lines = [ln for ln in r.stderr.splitlines() if ln.strip()]
+        return False, (lines[-1] if lines else "unknown error")
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return False, str(e)
 
 
 def _pick_vcodec():
     """Auto-detect a working GPU encoder; fall back to CPU only if none.
 
-    Order: Nvidia (NVENC) → Intel (QSV) → AMD (AMF) → CPU. Each candidate is
-    actually test-run, so we never pick a GPU encoder that's merely listed but
-    has no hardware behind it. Output stays H.264 baseline (Pi-decodable).
+    Each present GPU encoder is test-run; if it's in the ffmpeg build but the
+    test fails, the reason is printed so the CPU fallback isn't a mystery.
+    Modern GPUs (Ampere+) dropped H.264 baseline, so GPU paths use High
+    profile — the Pi's VideoCore decoder handles it fine.
     """
-    # NOTE: modern GPUs (Ampere+) dropped H.264 *baseline* in their encoders,
-    # so GPU paths use High profile — the Pi's VideoCore decoder handles it.
     candidates = [
-        (['-c:v', 'h264_nvenc', '-profile:v', 'high', '-level', '4.0',
+        ('h264_nvenc',
+         ['-c:v', 'h264_nvenc', '-profile:v', 'high', '-level', '4.0',
           '-preset', 'p4', '-cq', CRF, '-pix_fmt', 'yuv420p'], 'GPU (NVENC)'),
-        (['-c:v', 'h264_qsv', '-profile:v', 'high',
+        ('h264_qsv',
+         ['-c:v', 'h264_qsv', '-profile:v', 'high',
           '-global_quality', CRF, '-pix_fmt', 'nv12'], 'GPU (QSV)'),
-        (['-c:v', 'h264_amf', '-profile:v', 'high', '-rc', 'cqp',
+        ('h264_amf',
+         ['-c:v', 'h264_amf', '-profile:v', 'high', '-rc', 'cqp',
           '-qp_i', CRF, '-qp_p', CRF, '-pix_fmt', 'yuv420p'], 'GPU (AMF)'),
     ]
-    for vargs, label in candidates:
-        if _encoder_works(vargs):
+    any_listed = False
+    for codec, vargs, label in candidates:
+        if not _encoder_listed(codec):
+            continue
+        any_listed = True
+        ok, why = _encoder_works(vargs)
+        if ok:
             return vargs, label
-    return _CPU_VARGS, 'CPU (no GPU found)'
+        warn(f"{label} present but test failed → {why}")
+    if not any_listed:
+        warn("This ffmpeg build has no GPU encoders — get a full build "
+             "(gyan.dev 'full' or BtbN) to use your GPU.")
+    return _CPU_VARGS, 'CPU'
 
 # ── colorama ──────────────────────────────────────────────────────────────────
 try:
