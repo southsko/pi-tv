@@ -792,6 +792,18 @@ def _convert_one(src, out, label, in_args, vf, vargs, files_left=0,
     return True
 
 
+def _strip_pixfmt(vargs):
+    """Drop -pix_fmt (frames stay on the GPU for the full-cuda pipeline)."""
+    out, i = [], 0
+    while i < len(vargs):
+        if vargs[i] == '-pix_fmt':
+            i += 2
+            continue
+        out.append(vargs[i])
+        i += 1
+    return out
+
+
 def _pipelines(enc, vargs):
     """Ordered (in_args, vf, vargs, tag) attempts, fastest first.
     For NVENC we also decode+scale on the GPU (NVDEC) — the software decode of
@@ -801,7 +813,8 @@ def _pipelines(enc, vargs):
     if enc == 'GPU (NVENC)':
         return [
             (['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'],
-             'scale_cuda=-2:%s' % HEIGHT, vargs, 'GPU full (NVDEC+NVENC)'),
+             'scale_cuda=-2:%s' % HEIGHT, _strip_pixfmt(vargs),
+             'GPU full (NVDEC+NVENC)'),
             (['-hwaccel', 'cuda'], scale, vargs, 'GPU (NVENC, GPU decode)'),
             ([], scale, vargs, 'GPU (NVENC, CPU decode)'),
             ([], scale, _CPU_VARGS, 'CPU'),
