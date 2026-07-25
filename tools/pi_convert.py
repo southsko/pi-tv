@@ -712,14 +712,17 @@ def _fmt(secs):
     return "%d:%02d" % (secs // 60, secs % 60)
 
 
-def _convert_one(src, out, label, vargs, files_left=0, avg_wall=None):
+def _convert_one(src, out, label, in_args, vf, vargs, files_left=0,
+                 avg_wall=None):
     """Run ffmpeg with a live progress bar. Returns True on success.
 
+    in_args = args before -i (e.g. GPU decode hwaccel).
+    vf      = the scale filter string.
     files_left = whole files still queued after this one.
     avg_wall   = mean wall-seconds per finished file so far (None until known).
     """
     dur = _probe_duration(src)
-    cmd = ['ffmpeg', '-y', '-i', src, '-vf', 'scale=-2:%s' % HEIGHT] \
+    cmd = ['ffmpeg', '-y'] + in_args + ['-i', src, '-vf', vf] \
         + vargs \
         + ['-c:a', 'aac', '-ac', '2', '-b:a', '128k',
            '-movflags', '+faststart',
@@ -789,6 +792,25 @@ def _convert_one(src, out, label, vargs, files_left=0, avg_wall=None):
     return True
 
 
+def _pipelines(enc, vargs):
+    """Ordered (in_args, vf, vargs, tag) attempts, fastest first.
+    For NVENC we also decode+scale on the GPU (NVDEC) — the software decode of
+    1080p sources is usually what caps throughput. Each stage falls back to the
+    next if a file can't take it."""
+    scale = 'scale=-2:%s' % HEIGHT
+    if enc == 'GPU (NVENC)':
+        return [
+            (['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'],
+             'scale_cuda=-2:%s' % HEIGHT, vargs, 'GPU full (NVDEC+NVENC)'),
+            (['-hwaccel', 'cuda'], scale, vargs, 'GPU (NVENC, GPU decode)'),
+            ([], scale, vargs, 'GPU (NVENC, CPU decode)'),
+            ([], scale, _CPU_VARGS, 'CPU'),
+        ]
+    if enc.startswith('GPU'):
+        return [([], scale, vargs, enc), ([], scale, _CPU_VARGS, 'CPU')]
+    return [([], scale, _CPU_VARGS, 'CPU')]
+
+
 def run_convert(selected, out_dir):
     if not selected:
         warn("No files selected.")
@@ -798,12 +820,13 @@ def run_convert(selected, out_dir):
 
     print(); info("Detecting GPU encoder...")
     vargs, enc = _pick_vcodec()
-    is_gpu = enc.startswith("GPU")
+    ladder = _pipelines(enc, vargs)
+    stage = 0                       # sticky: once a stage fails we stay dropped
 
     print(); div()
     print(f"{Fore.CYAN}{Style.BRIGHT}  📺  CONVERTING {len(selected)} CLIP(S) → {HEIGHT}p Pi TV{Style.RESET_ALL}")
     info(f"Output  →  {Fore.WHITE}{Style.BRIGHT}{out_dir}{Style.RESET_ALL}")
-    info(f"Encoder →  {Fore.WHITE}{Style.BRIGHT}{enc}{Style.RESET_ALL}")
+    info(f"Encoder →  {Fore.WHITE}{Style.BRIGHT}{ladder[stage][3]}{Style.RESET_ALL}")
     div(); print()
 
     done_names, ok_n, fail_n, skip_n = set(), 0, 0, 0
@@ -832,14 +855,19 @@ def run_convert(selected, out_dir):
         avg_wall = (wall_done / files_done) if files_done else None
         files_left = total - i          # whole files after this one
         t0 = time.time()
+        success = False
         try:
-            success = _convert_one(src, out, label, vargs, files_left, avg_wall)
-            if not success and is_gpu:
-                warn("GPU failed on this file — retrying on CPU")
+            while stage < len(ladder):
+                in_a, vf, va, tag = ladder[stage]
+                success = _convert_one(src, out, label, in_a, vf, va,
+                                       files_left, avg_wall)
+                if success:
+                    break
                 if os.path.isfile(out):
                     os.remove(out)
-                success = _convert_one(src, out, label, _CPU_VARGS,
-                                       files_left, avg_wall)
+                stage += 1           # this stage can't handle it → drop down
+                if stage < len(ladder):
+                    warn(f"falling back to: {ladder[stage][3]}")
         except FileNotFoundError:
             err("'ffmpeg'/'ffprobe' not found — install it / check PATH.")
             return
