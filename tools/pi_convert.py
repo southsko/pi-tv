@@ -18,6 +18,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 
 # ── quality knobs (env-overridable) ───────────────────────────────────────────
 HEIGHT = os.environ.get("HEIGHT", "480")
@@ -424,14 +425,25 @@ def _probe_duration(path):
         return 0.0
 
 
-def _bar(frac, width=26):
+def _bar(frac, width=22):
     frac = max(0.0, min(1.0, frac))
     fill = int(frac * width)
     return '[' + '#' * fill + '-' * (width - fill) + ']'
 
 
-def _convert_one(src, out, label, vargs):
-    """Run ffmpeg with a live progress bar. Returns True on success."""
+def _fmt(secs):
+    secs = int(max(0, secs))
+    if secs >= 3600:
+        return "%d:%02d:%02d" % (secs // 3600, (secs % 3600) // 60, secs % 60)
+    return "%d:%02d" % (secs // 60, secs % 60)
+
+
+def _convert_one(src, out, label, vargs, files_left=0, avg_wall=None):
+    """Run ffmpeg with a live progress bar. Returns True on success.
+
+    files_left = whole files still queued after this one.
+    avg_wall   = mean wall-seconds per finished file so far (None until known).
+    """
     dur = _probe_duration(src)
     cmd = ['ffmpeg', '-y', '-i', src, '-vf', 'scale=-2:%s' % HEIGHT] \
         + vargs \
@@ -470,20 +482,26 @@ def _convert_one(src, out, label, vargs):
             continue  # only redraw on the last key of each progress block
 
         rate = "%4.0ffps" % fps if fps else "  --fps"
+        # ETA for this file, from ffmpeg's own speed multiplier
+        file_eta = (dur - cur) / speed if (dur > 0 and speed > 0) else None
+        # ETA for the whole queue: this file's remaining + avg per remaining file
+        q_eta = None
+        if avg_wall:
+            q_eta = avg_wall * files_left + (file_eta if file_eta is not None
+                                            else avg_wall)
+        f_txt = "ETA " + _fmt(file_eta) if file_eta is not None else "ETA --"
+        q_txt = "Q " + _fmt(q_eta) if q_eta is not None else "Q --"
         if dur > 0:
             frac = cur / dur
-            eta = ""
-            if speed > 0:
-                secs = int((dur - cur) / speed)
-                eta = "  ETA %d:%02d" % (secs // 60, secs % 60)
-            msg = "  %s  %s %3d%%  %s  %.1fx%s" % (
-                label, _bar(frac), int(frac * 100), rate, speed, eta)
+            msg = "  %s  %s %3d%%  %.0ffps %.1fx  %s  %s" % (
+                label, _bar(frac), int(frac * 100), fps, speed, f_txt, q_txt)
         else:
-            msg = "  %s  %ds  %s  %.1fx" % (label, int(cur), rate, speed)
-        sys.stdout.write("\r" + msg[:100].ljust(100))
+            msg = "  %s  %ds  %.0ffps %.1fx  %s" % (
+                label, int(cur), fps, speed, q_txt)
+        sys.stdout.write("\r" + msg[:110].ljust(110))
         sys.stdout.flush()
     proc.wait()
-    sys.stdout.write("\r" + " " * 100 + "\r")   # wipe the progress line
+    sys.stdout.write("\r" + " " * 110 + "\r")   # wipe the progress line
     sys.stdout.flush()
 
     if proc.returncode != 0:
@@ -516,6 +534,7 @@ def run_convert(selected, out_dir):
 
     done_names, ok_n, fail_n, skip_n = set(), 0, 0, 0
     total = len(selected)
+    wall_done, files_done = 0.0, 0     # for the queue ETA
     for i, src in enumerate(sorted(selected), 1):
         base = os.path.splitext(os.path.basename(src))[0]
         name = base + ".mp4"
@@ -536,16 +555,22 @@ def run_convert(selected, out_dir):
         # short label for the progress line (keep the episode-ish bit)
         short = base if len(base) <= 34 else base[:31] + "..."
         label = f"{counter} {short}"
+        avg_wall = (wall_done / files_done) if files_done else None
+        files_left = total - i          # whole files after this one
+        t0 = time.time()
         try:
-            success = _convert_one(src, out, label, vargs)
+            success = _convert_one(src, out, label, vargs, files_left, avg_wall)
             if not success and is_gpu:
                 warn("GPU failed on this file — retrying on CPU")
                 if os.path.isfile(out):
                     os.remove(out)
-                success = _convert_one(src, out, label, _CPU_VARGS)
+                success = _convert_one(src, out, label, _CPU_VARGS,
+                                       files_left, avg_wall)
         except FileNotFoundError:
             err("'ffmpeg'/'ffprobe' not found — install it / check PATH.")
             return
+        wall_done += time.time() - t0
+        files_done += 1
         if success:
             ok_n += 1
             print(f"  {Fore.GREEN}done{Style.RESET_ALL} {counter} {name}")
