@@ -221,6 +221,44 @@ Afterwards all roads lead to the same place: card-in-Windows, Samba, SFTP, and
 web uploads all land on the exFAT partition. Notes: needs Windows 10 1703+ to
 see multiple partitions on an SD card; macOS reads exFAT fine too.
 
+## Configuration reference
+
+Everything lives in `config.json` (edit, then `sudo systemctl restart
+simpsonstv`). Defaults shown.
+
+| Key | Default | What it does |
+|---|---|---|
+| `web_port` | `8080` | Port for the web remote/file manager |
+| `static_volume` | `40` | Volume (0–130) of the channel-change static vs normal programming |
+| `power_switch_mode` | `"toggle"` | `"switch"` if you wired a slide switch instead of a pushbutton |
+| `osd_rotate` | `270` | Rotation of the on-screen overlay text; match `--video-rotate` |
+| `osd_font_size` | `36` | Overlay text size |
+| `touch.enabled` | `true` | Turn the touchscreen on/off |
+| `touch.rotate` | `270` | Maps touch coords to the rotated display (`90`/`180`/`270`) |
+| `touch.swipe_px` | `80` | Pixels of movement before a tap counts as a swipe |
+| `touch.long_press_s` | `0.8` | Seconds held to count as a long-press |
+| `touch.seek_step` | `30` | Seconds for a seek gesture |
+| `touch.overlay_s` | `3.0` | How long the control overlay stays up |
+| `touch.gestures.*` | see above | Remap `tap`, `up/down/left/right`, `hold_left/right/top/bottom/center` |
+| `pins.power_button` | `26` | GPIO for the power button (`null` = none) |
+| `pins.channel_button` | `null` | Optional channel button (no free pin on the Waveshare screen) |
+| `pins.backlight` | `18` | Screen backlight enable |
+| `pins.audio_pwm` | `19` | PWM audio output pin |
+| `pins.amp_enable` | `null` | Optional amp enable/shutdown pin |
+| `mpv_args` | (list) | Raw mpv flags — rotation, `--hwdec`, `--vo`, volume normalization, etc. |
+| `videos_dir` | `videos/` | Where channels/episodes live (the exFAT mount point when used) |
+
+**Environment variables** (set before running a script):
+
+| Var | Used by | Effect |
+|---|---|---|
+| `SKIP_SAMBA`, `SKIP_EXFAT`, `SKIP_SCREEN` | `setup.sh` | Skip that install step |
+| `ZERO_FIX=1` | `setup_screen.sh` | Apply the Pi Zero 2 W green-tint overlay fix |
+| `HEIGHT`, `CRF`, `PRESET` | `pi_convert.py`, `encode.py` | Output height, quality (lower = better/bigger), x264 speed |
+| `SKIP` | `encode.py` | Comma-separated words to ignore (default `sample`) |
+| `PI_TV_OUT` | `pi_convert.py` | Preset output folder (skips the prompt) |
+| `PI_TV_GUI=1` / `PI_TV_TUI=1` | `pi_convert.py` | Force the native GUI / force the terminal browser |
+
 ## Files
 
 - `tv.py` — main service (start here)
