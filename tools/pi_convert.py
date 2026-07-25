@@ -541,30 +541,39 @@ def _ansi_select(start_dir, pick_dir=False):
             return None
 
 
+def _curses_run(*args):
+    """Run the curses browser; if terminfo is missing (e.g. under `screen`
+    with TERM=screen and no terminfo entry), retry with TERM=xterm."""
+    try:
+        return curses.wrapper(_curses_selector, *args)
+    except curses.error:
+        os.environ["TERM"] = "xterm"
+        return curses.wrapper(_curses_selector, *args)
+
+
 def interactive_select(files):
-    # ANSI browser first: no terminfo dependency, so it survives `screen`,
-    # bare TERM, etc. Curses only as a secondary path.
-    if HAS_ANSI:
-        result = _ansi_select(os.getcwd())
-        return [] if result is None else result
+    # curses first — the proven browser. ANSI only if curses can't start.
     if HAS_CURSES:
         try:
-            result = curses.wrapper(_curses_selector, os.getcwd())
+            result = _curses_run(os.getcwd())
             return [] if result is None else result
         except Exception:
             pass
+    if HAS_ANSI:
+        result = _ansi_select(os.getcwd())
+        return [] if result is None else result
     warn("No interactive browser available — using a text list.\n")
     return fallback_select(files)
 
 
 def interactive_pick_dir(start):
-    if HAS_ANSI:
-        return _ansi_select(start, True)
     if HAS_CURSES:
         try:
-            return curses.wrapper(_curses_selector, start, True)
+            return _curses_run(start, True)
         except Exception:
-            return None
+            pass
+    if HAS_ANSI:
+        return _ansi_select(start, True)
     return None
 
 
