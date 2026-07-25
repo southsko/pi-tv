@@ -618,18 +618,28 @@ def main():
         print("[NOTE] pip install colorama  for coloured output")
     print(BANNER)
 
-    use_tui = os.environ.get("PI_TV_TUI")   # set to force the text/curses browser
     selected, out_dir = (None, None)
+    want_gui = os.environ.get("PI_TV_GUI")   # set to force the native GUI
 
-    if not use_tui:
-        selected, out_dir = gui_select()    # native dialogs (Windows-friendly)
-
-    if selected is None:                    # GUI unavailable/cancelled → browser
+    if HAS_CURSES and not want_gui:
+        # the DOS-style file browser (the original experience)
         input(f"{Fore.YELLOW}  Press ENTER to open the file browser...{Style.RESET_ALL}  ")
         selected = interactive_select(find_video_files())
         if selected:
             default_out = os.environ.get("PI_TV_OUT") or _output_dir(selected)
             out_dir = choose_output(os.path.abspath(default_out))
+    else:
+        # no working curses (e.g. Microsoft Store Python) → native GUI dialogs
+        if not HAS_CURSES and not want_gui:
+            warn("curses unavailable — using the graphical picker instead.")
+            warn("For the DOS-style browser, install Python from python.org "
+                 "(not the Microsoft Store) — see the README.")
+        selected, out_dir = gui_select()
+        if selected is None:                 # GUI also unavailable → text list
+            selected = interactive_select(find_video_files())
+            if selected:
+                default_out = os.environ.get("PI_TV_OUT") or _output_dir(selected)
+                out_dir = choose_output(os.path.abspath(default_out))
 
     print(BANNER)
     if not selected:
