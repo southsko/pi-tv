@@ -15,10 +15,18 @@ Adapted from southsko/drone-footage-merger.
 """
 import glob
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
+
+# msvcrt = built into Windows Python (no pip). Powers a curses-free browser.
+try:
+    import msvcrt
+    HAS_MSVCRT = True
+except ImportError:
+    HAS_MSVCRT = False
 
 # ── quality knobs (env-overridable) ───────────────────────────────────────────
 HEIGHT = os.environ.get("HEIGHT", "480")
@@ -307,19 +315,146 @@ def _curses_selector(stdscr, start_dir, pick_dir=False):
             return None
 
 
+# ── curses-free DOS browser (msvcrt + ANSI) — no pip, any Python ──────────────
+HAS_ANSI = HAS_MSVCRT  # ANSI browser is offered on Windows without curses
+
+_ESC = "\x1b"
+
+
+def _read_key():
+    """One keypress → a normalized name. Windows msvcrt implementation."""
+    ch = msvcrt.getwch()
+    if ch in ("\x00", "\xe0"):                 # special key: read the 2nd byte
+        c2 = msvcrt.getwch()
+        return {"H": "up", "P": "down", "K": "left", "M": "right",
+                "I": "pgup", "Q": "pgdn", "G": "home", "O": "end"}.get(c2, "")
+    if ch in ("\r", "\n"):
+        return "enter"
+    if ch == "\x08":
+        return "backspace"
+    if ch == "\x1b":
+        return "quit"
+    if ch == " ":
+        return "space"
+    return ch.lower()
+
+
+def _ansi_select(start_dir, pick_dir=False):
+    """Blue DOS-style file browser using ANSI + msvcrt. Returns tagged list
+    (or the chosen dir if pick_dir), or None if cancelled."""
+    def load(d):
+        e = _get_dir_entries(d)
+        return [x for x in e if x[0] in ("up", "dir")] if pick_dir else e
+
+    current, tagged, cursor, scroll = start_dir, {}, 0, 0
+    entries = load(current)
+
+    while True:
+        cols, rows = shutil.get_terminal_size((80, 24))
+        W = cols - 1
+        list_h = max(3, rows - 4)
+        if cursor < scroll:
+            scroll = cursor
+        if cursor >= scroll + list_h:
+            scroll = cursor - list_h + 1
+
+        out = [_ESC + "[2J" + _ESC + "[H"]
+        out.append(f"{_ESC}[44;37;1m {current[:W-1].ljust(W-1)}{_ESC}[0m")
+        out.append(f"{_ESC}[1m{'=' * W}{_ESC}[0m")
+        vis = entries[scroll:scroll + list_h]
+        for idx, (kind, name, full) in enumerate(vis):
+            is_cur = (scroll + idx) == cursor
+            if kind in ("up", "dir"):
+                body = "<DIR>  " + name
+            else:
+                body = ("[*]" if full in tagged else "[ ]") + "  " + name
+            line = (("> " if is_cur else "  ") + body)[:W].ljust(W)
+            if is_cur:
+                out.append(f"{_ESC}[7m{line}{_ESC}[0m")
+            elif kind in ("up", "dir"):
+                out.append(f"{_ESC}[36;1m{line}{_ESC}[0m")
+            elif full in tagged:
+                out.append(f"{_ESC}[33;1m{line}{_ESC}[0m")
+            else:
+                out.append(line)
+        out.extend([""] * (list_h - len(vis)))
+        if pick_dir:
+            hint = "  Enter=open  Bksp=up  C=CHOOSE THIS FOLDER  Q=cancel"
+        else:
+            hint = (f"  {len(tagged)} tagged | Space=tag  Enter=open  Bksp=up"
+                    "  A=all  C=convert  Q=quit")
+        out.append(f"{_ESC}[44;37;1m{hint[:W].ljust(W)}{_ESC}[0m")
+        sys.stdout.write("\n".join(out))
+        sys.stdout.flush()
+
+        k = _read_key()
+        if k == "up":
+            cursor = max(0, cursor - 1)
+        elif k == "down":
+            cursor = min(len(entries) - 1, cursor + 1)
+        elif k == "pgup":
+            cursor = max(0, cursor - list_h)
+        elif k == "pgdn":
+            cursor = min(len(entries) - 1, cursor + list_h)
+        elif k == "home":
+            cursor = 0
+        elif k == "end":
+            cursor = max(0, len(entries) - 1)
+        elif k in ("enter", "right"):
+            if entries:
+                kind, name, full = entries[cursor]
+                if kind in ("up", "dir"):
+                    current = full
+                    entries = load(current)
+                    cursor = scroll = 0
+                elif not pick_dir:
+                    tagged.pop(full, None) if full in tagged \
+                        else tagged.__setitem__(full, True)
+        elif k in ("backspace", "left"):
+            parent = os.path.dirname(current)
+            if os.path.normcase(parent) != os.path.normcase(current):
+                current = parent
+                entries = load(current)
+                cursor = scroll = 0
+        elif k == "space" and not pick_dir:
+            if entries:
+                kind, name, full = entries[cursor]
+                if kind == "file":
+                    tagged.pop(full, None) if full in tagged \
+                        else tagged.__setitem__(full, True)
+        elif k == "a" and not pick_dir:
+            fps = [fp for kk, _, fp in entries if kk == "file"]
+            if fps and all(fp in tagged for fp in fps):
+                for fp in fps:
+                    tagged.pop(fp, None)
+            else:
+                for fp in fps:
+                    tagged[fp] = True
+        elif k == "c":
+            sys.stdout.write(_ESC + "[2J" + _ESC + "[H")
+            return current if pick_dir else list(tagged.keys())
+        elif k == "q":
+            sys.stdout.write(_ESC + "[2J" + _ESC + "[H")
+            return None
+
+
 def interactive_select(files):
-    if not HAS_CURSES:
-        warn("curses not available. On Windows:  pip install windows-curses")
-        warn("Falling back to text input.\n")
-        return fallback_select(files)
-    result = curses.wrapper(_curses_selector, os.getcwd())
-    return [] if result is None else result
+    if HAS_CURSES:
+        result = curses.wrapper(_curses_selector, os.getcwd())
+        return [] if result is None else result
+    if HAS_ANSI:
+        result = _ansi_select(os.getcwd())
+        return [] if result is None else result
+    warn("No interactive browser available — using a text list.\n")
+    return fallback_select(files)
 
 
 def interactive_pick_dir(start):
-    if not HAS_CURSES:
-        return None
-    return curses.wrapper(_curses_selector, start, True)
+    if HAS_CURSES:
+        return curses.wrapper(_curses_selector, start, True)
+    if HAS_ANSI:
+        return _ansi_select(start, True)
+    return None
 
 
 def _videos_under(folder):
@@ -395,13 +530,14 @@ def choose_output(default):
     """Let the user keep the default, paste a path, or browse to a folder."""
     print()
     info(f"Default output: {Fore.WHITE}{Style.BRIGHT}{default}{Style.RESET_ALL}")
+    can_browse = HAS_CURSES or HAS_ANSI
     prompt = (f"{Fore.YELLOW}Output folder — ENTER=default"
-              + (", B=browse" if HAS_CURSES else "")
+              + (", B=browse" if can_browse else "")
               + f", or paste a path:{Style.RESET_ALL} ")
     resp = input(prompt).strip().strip('"').strip("'")
     if resp == "":
         return default
-    if resp.lower() == "b" and HAS_CURSES:
+    if resp.lower() == "b" and can_browse:
         picked = interactive_pick_dir(os.path.dirname(default) or os.getcwd())
         return picked or default
     path = os.path.abspath(os.path.expanduser(resp))
@@ -621,20 +757,15 @@ def main():
     selected, out_dir = (None, None)
     want_gui = os.environ.get("PI_TV_GUI")   # set to force the native GUI
 
-    if HAS_CURSES and not want_gui:
-        # the DOS-style file browser (the original experience)
+    if (HAS_CURSES or HAS_ANSI) and not want_gui:
+        # the DOS-style file browser (the original experience, no pip needed)
         input(f"{Fore.YELLOW}  Press ENTER to open the file browser...{Style.RESET_ALL}  ")
         selected = interactive_select(find_video_files())
         if selected:
             default_out = os.environ.get("PI_TV_OUT") or _output_dir(selected)
             out_dir = choose_output(os.path.abspath(default_out))
     else:
-        # no working curses (e.g. Microsoft Store Python) → native GUI dialogs
-        if not HAS_CURSES and not want_gui:
-            warn("curses unavailable — using the graphical picker instead.")
-            warn("For the DOS-style browser, install Python from python.org "
-                 "(not the Microsoft Store) — see the README.")
-        selected, out_dir = gui_select()
+        selected, out_dir = gui_select()     # native dialogs
         if selected is None:                 # GUI also unavailable → text list
             selected = interactive_select(find_video_files())
             if selected:
