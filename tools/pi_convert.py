@@ -24,6 +24,37 @@ HEIGHT = os.environ.get("HEIGHT", "480")
 CRF = os.environ.get("CRF", "23")
 PRESET = os.environ.get("PRESET", "fast")
 OUTPUT_SUBDIR = "encoded"
+# ENCODER: cpu (default), auto, nvenc (Nvidia), qsv (Intel), amf (AMD).
+# GPU modes are much faster; output stays Pi-decodable (H.264 baseline).
+ENCODER = os.environ.get("ENCODER", "cpu").lower()
+
+_CPU_VARGS = ['-c:v', 'libx264', '-profile:v', 'baseline', '-level', '3.0',
+              '-preset', PRESET, '-crf', CRF, '-pix_fmt', 'yuv420p']
+
+
+def _have_encoder(name):
+    try:
+        r = subprocess.run(['ffmpeg', '-hide_banner', '-encoders'],
+                           capture_output=True, text=True)
+        return name in r.stdout
+    except OSError:
+        return False
+
+
+def _pick_vcodec():
+    """Return (video-args, label). Honors ENCODER, falls back to CPU."""
+    e = ENCODER
+    if e in ('nvenc', 'gpu', 'auto') and _have_encoder('h264_nvenc'):
+        return (['-c:v', 'h264_nvenc', '-profile:v', 'baseline',
+                 '-preset', 'p4', '-cq', CRF, '-pix_fmt', 'yuv420p'], 'nvenc')
+    if e in ('qsv', 'auto') and _have_encoder('h264_qsv'):
+        return (['-c:v', 'h264_qsv', '-profile:v', 'baseline',
+                 '-global_quality', CRF], 'qsv')
+    if e in ('amf', 'auto') and _have_encoder('h264_amf'):
+        return (['-c:v', 'h264_amf', '-profile:v', 'baseline',
+                 '-rc', 'cqp', '-qp_i', CRF, '-qp_p', CRF,
+                 '-pix_fmt', 'yuv420p'], 'amf')
+    return (_CPU_VARGS, 'cpu')
 
 # ── colorama ──────────────────────────────────────────────────────────────────
 try:
@@ -393,18 +424,14 @@ def _bar(frac, width=26):
     return '[' + '#' * fill + '-' * (width - fill) + ']'
 
 
-def _convert_one(src, out, label):
+def _convert_one(src, out, label, vargs):
     """Run ffmpeg with a live progress bar. Returns True on success."""
     dur = _probe_duration(src)
-    cmd = [
-        'ffmpeg', '-y', '-i', src,
-        '-vf', 'scale=-2:%s' % HEIGHT,
-        '-c:v', 'libx264', '-profile:v', 'baseline', '-level', '3.0',
-        '-preset', PRESET, '-crf', CRF, '-pix_fmt', 'yuv420p',
-        '-c:a', 'aac', '-ac', '2', '-b:a', '128k',
-        '-movflags', '+faststart',
-        '-progress', 'pipe:1', '-nostats', out,
-    ]
+    cmd = ['ffmpeg', '-y', '-i', src, '-vf', 'scale=-2:%s' % HEIGHT] \
+        + vargs \
+        + ['-c:a', 'aac', '-ac', '2', '-b:a', '128k',
+           '-movflags', '+faststart',
+           '-progress', 'pipe:1', '-nostats', out]
     errf = tempfile.TemporaryFile()
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errf,
@@ -471,9 +498,13 @@ def run_convert(selected, out_dir):
 
     os.makedirs(out_dir, exist_ok=True)
 
+    vargs, enc = _pick_vcodec()
+
     print(); div()
     print(f"{Fore.CYAN}{Style.BRIGHT}  📺  CONVERTING {len(selected)} CLIP(S) → {HEIGHT}p Pi TV{Style.RESET_ALL}")
     info(f"Output  →  {Fore.WHITE}{Style.BRIGHT}{out_dir}{Style.RESET_ALL}")
+    info(f"Encoder →  {Fore.WHITE}{Style.BRIGHT}{enc}{Style.RESET_ALL}"
+         + ("" if enc != 'cpu' else "   (set ENCODER=auto to try GPU)"))
     div(); print()
 
     done_names, ok_n, fail_n, skip_n = set(), 0, 0, 0
@@ -499,7 +530,12 @@ def run_convert(selected, out_dir):
         short = base if len(base) <= 34 else base[:31] + "..."
         label = f"{counter} {short}"
         try:
-            success = _convert_one(src, out, label)
+            success = _convert_one(src, out, label, vargs)
+            if not success and enc != 'cpu':
+                warn(f"{enc} failed on this file — retrying on CPU")
+                if os.path.isfile(out):
+                    os.remove(out)
+                success = _convert_one(src, out, label, _CPU_VARGS)
         except FileNotFoundError:
             err("'ffmpeg'/'ffprobe' not found — install it / check PATH.")
             return
