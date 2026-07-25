@@ -236,7 +236,7 @@ def _curses_selector(stdscr, start_dir, pick_dir=False):
             except Exception: pass
 
         if pick_dir:
-            hint = '  Enter=open folder  Bksp=up  F2=CHOOSE THIS FOLDER  Q=cancel'
+            hint = '  Enter=open  Bksp=up  N=new folder  F2=CHOOSE HERE  Q=cancel'
         else:
             hint = ('  ' + str(len(tagged)) + ' tagged  |  Sp=tag  Enter=open  '
                     'Bksp=up  A=all  F2=convert  Q=quit')
@@ -309,6 +309,26 @@ def _curses_selector(stdscr, start_dir, pick_dir=False):
         elif key == curses.KEY_F8:
             for k, _, fp in entries:
                 if k == 'file': tagged.pop(fp, None)
+        elif key in (ord('n'), ord('N')) and pick_dir:
+            curses.echo(); curses.curs_set(1)
+            try:
+                stdscr.addstr(h - 1, 0, ' New folder: '.ljust(W), C_BAR)
+                stdscr.refresh()
+                name = stdscr.getstr(h - 1, 13, 80).decode('utf-8', 'replace').strip()
+            except Exception:
+                name = ''
+            curses.noecho(); curses.curs_set(0)
+            if name:
+                newp = os.path.join(current_dir, os.path.basename(name))
+                try:
+                    os.makedirs(newp, exist_ok=True)
+                    entries = load(current_dir)
+                    for i, (_, _, fp) in enumerate(entries):
+                        if os.path.normcase(fp) == os.path.normcase(newp):
+                            cursor, scroll = i, 0
+                            break
+                except OSError:
+                    pass
         elif key in (curses.KEY_F2, ord('m'), ord('M'), ord('c'), ord('C')):
             return current_dir if pick_dir else list(tagged.keys())
         elif key in (curses.KEY_F10, ord('q'), ord('Q')):
@@ -379,7 +399,7 @@ def _ansi_select(start_dir, pick_dir=False):
                 out.append(line)
         out.extend([""] * (list_h - len(vis)))
         if pick_dir:
-            hint = "  Enter=open  Bksp=up  C=CHOOSE THIS FOLDER  Q=cancel"
+            hint = "  Enter=open  Bksp=up  N=new folder  C=CHOOSE HERE  Q=cancel"
         else:
             hint = (f"  {len(tagged)} tagged | Space=tag  Enter=open  Bksp=up"
                     "  A=all  C=convert  Q=quit")
@@ -430,6 +450,21 @@ def _ansi_select(start_dir, pick_dir=False):
             else:
                 for fp in fps:
                     tagged[fp] = True
+        elif k == "n" and pick_dir:
+            sys.stdout.write(_ESC + "[2J" + _ESC + "[H")
+            name = input("New folder name: ").strip().strip('"').strip("'")
+            if name:
+                newp = os.path.join(current, os.path.basename(name))
+                try:
+                    os.makedirs(newp, exist_ok=True)
+                    entries = load(current)
+                    for i, (_, _, fp) in enumerate(entries):
+                        if os.path.normcase(fp) == os.path.normcase(newp):
+                            cursor, scroll = i, 0
+                            break
+                except OSError as e:
+                    print("Could not create folder: %s" % e)
+                    input("Press ENTER...")
         elif k == "c":
             sys.stdout.write(_ESC + "[2J" + _ESC + "[H")
             return current if pick_dir else list(tagged.keys())
