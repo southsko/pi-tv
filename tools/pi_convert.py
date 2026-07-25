@@ -14,9 +14,10 @@ Run on your PC (never the Pi — encoding is far too slow there):
 Adapted from southsko/drone-footage-merger.
 """
 import glob
-import json
 import os
 import subprocess
+import sys
+import tempfile
 
 # ── quality knobs (env-overridable) ───────────────────────────────────────────
 HEIGHT = os.environ.get("HEIGHT", "480")
@@ -375,6 +376,75 @@ def _output_dir(selected):
     return os.path.join(base, OUTPUT_SUBDIR)
 
 
+def _probe_duration(path):
+    """Length of a video in seconds (0 if unknown)."""
+    try:
+        r = subprocess.run(
+            ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration',
+             '-of', 'csv=p=0', path], capture_output=True, text=True)
+        return float(r.stdout.strip())
+    except (ValueError, OSError):
+        return 0.0
+
+
+def _bar(frac, width=26):
+    frac = max(0.0, min(1.0, frac))
+    fill = int(frac * width)
+    return '[' + '#' * fill + '-' * (width - fill) + ']'
+
+
+def _convert_one(src, out, label):
+    """Run ffmpeg with a live progress bar. Returns True on success."""
+    dur = _probe_duration(src)
+    cmd = [
+        'ffmpeg', '-y', '-i', src,
+        '-vf', 'scale=-2:%s' % HEIGHT,
+        '-c:v', 'libx264', '-profile:v', 'baseline', '-level', '3.0',
+        '-preset', PRESET, '-crf', CRF, '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-ac', '2', '-b:a', '128k',
+        '-movflags', '+faststart',
+        '-progress', 'pipe:1', '-nostats', out,
+    ]
+    errf = tempfile.TemporaryFile()
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errf,
+                                text=True, bufsize=1)
+    except FileNotFoundError:
+        errf.close()
+        raise
+
+    cur = 0.0
+    for line in proc.stdout:
+        line = line.strip()
+        if line.startswith('out_time='):
+            ts = line.split('=', 1)[1]
+            try:
+                hh, mm, ss = ts.split(':')
+                cur = int(hh) * 3600 + int(mm) * 60 + float(ss)
+            except ValueError:
+                pass
+        if dur > 0:
+            frac = cur / dur
+            msg = "  %s  %s %3d%%" % (label, _bar(frac), int(frac * 100))
+        else:
+            msg = "  %s  %ds elapsed" % (label, int(cur))
+        sys.stdout.write("\r" + msg[:100].ljust(100))
+        sys.stdout.flush()
+    proc.wait()
+    sys.stdout.write("\r" + " " * 100 + "\r")   # wipe the progress line
+    sys.stdout.flush()
+
+    if proc.returncode != 0:
+        errf.seek(0)
+        tail = errf.read().decode('utf-8', 'replace').strip().splitlines()[-2:]
+        errf.close()
+        for ln in tail:
+            print("      %s" % ln)
+        return False
+    errf.close()
+    return True
+
+
 def run_convert(selected, out_dir):
     if not selected:
         warn("No files selected.")
@@ -388,7 +458,8 @@ def run_convert(selected, out_dir):
     div(); print()
 
     done_names, ok_n, fail_n, skip_n = set(), 0, 0, 0
-    for src in sorted(selected):
+    total = len(selected)
+    for i, src in enumerate(sorted(selected), 1):
         base = os.path.splitext(os.path.basename(src))[0]
         name = base + ".mp4"
         if name in done_names:
@@ -399,36 +470,28 @@ def run_convert(selected, out_dir):
         done_names.add(name)
         out = os.path.join(out_dir, name)
 
+        counter = f"[{i}/{total}]"
         if os.path.isfile(out):
-            print(f"  {Fore.YELLOW}skip{Style.RESET_ALL}  {name} (exists)")
+            print(f"  {Fore.YELLOW}skip{Style.RESET_ALL} {counter} {name} (exists)")
             skip_n += 1
             continue
 
-        print(f"  {Fore.CYAN}conv{Style.RESET_ALL}  {os.path.basename(src)} → {name}")
-        cmd = [
-            'ffmpeg', '-y', '-i', src,
-            '-vf', 'scale=-2:%s' % HEIGHT,
-            '-c:v', 'libx264', '-profile:v', 'baseline', '-level', '3.0',
-            '-preset', PRESET, '-crf', CRF, '-pix_fmt', 'yuv420p',
-            '-c:a', 'aac', '-ac', '2', '-b:a', '128k',
-            '-movflags', '+faststart',
-            out,
-        ]
+        # short label for the progress line (keep the episode-ish bit)
+        short = base if len(base) <= 34 else base[:31] + "..."
+        label = f"{counter} {short}"
         try:
-            r = subprocess.run(cmd, stdout=subprocess.DEVNULL,
-                               stderr=subprocess.PIPE)
+            success = _convert_one(src, out, label)
         except FileNotFoundError:
-            err("'ffmpeg' not found — install it / check PATH.")
+            err("'ffmpeg'/'ffprobe' not found — install it / check PATH.")
             return
-        if r.returncode == 0:
+        if success:
             ok_n += 1
+            print(f"  {Fore.GREEN}done{Style.RESET_ALL} {counter} {name}")
         else:
             fail_n += 1
             if os.path.isfile(out):
                 os.remove(out)
-            print(f"    {Fore.RED}FAILED{Style.RESET_ALL}")
-            for line in r.stderr.decode('utf-8', 'replace').strip().splitlines()[-2:]:
-                print(f"      {line}")
+            print(f"  {Fore.RED}FAIL{Style.RESET_ALL} {counter} {name}")
 
     print(); div()
     ok(f"{ok_n} converted, {skip_n} skipped, {fail_n} failed  →  {out_dir}")
