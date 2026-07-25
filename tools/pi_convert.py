@@ -200,7 +200,7 @@ def _curses_selector(stdscr, start_dir, pick_dir=False):
         return [x for x in e if x[0] in ('up', 'dir')] if pick_dir else e
 
     current_dir = start_dir
-    tagged, cursor, scroll = {}, 0, 0
+    tagged, tagged_dirs, cursor, scroll = {}, set(), 0, 0
     entries = load(current_dir)
 
     while True:
@@ -224,8 +224,10 @@ def _curses_selector(stdscr, start_dir, pick_dir=False):
             is_cur = abs_i == cursor
             row = ENTRY_TOP + idx
             if kind in ('up', 'dir'):
-                body = '<DIR>  ' + name
-                attr = curses.A_REVERSE if is_cur else C_DIR
+                tagmark = '[*] ' if full_path in tagged_dirs else ''
+                body = tagmark + '<DIR>  ' + name
+                attr = (curses.A_REVERSE if is_cur
+                        else C_TAG if full_path in tagged_dirs else C_DIR)
             else:
                 mark = '[*]' if full_path in tagged else '[ ]'
                 body = mark + '  ' + name
@@ -301,11 +303,15 @@ def _curses_selector(stdscr, start_dir, pick_dir=False):
                     tagged.pop(full_path, None) if full_path in tagged \
                         else tagged.__setitem__(full_path, True)
                 elif kind == 'dir':                 # tag ALL videos under it
+                    stdscr.addstr(h - 1, 0, ' scanning folder...'.ljust(W), C_BAR)
+                    stdscr.refresh()
                     vids = _videos_under(full_path)
-                    if vids and all(v in tagged for v in vids):
+                    if full_path in tagged_dirs:
                         for v in vids: tagged.pop(v, None)
+                        tagged_dirs.discard(full_path)
                     else:
                         for v in vids: tagged[v] = True
+                        tagged_dirs.add(full_path)
         elif key in (curses.KEY_F5, ord('a'), ord('A')):
             fps = [fp for k, _, fp in entries if k == 'file']
             if fps and all(fp in tagged for fp in fps):
@@ -372,7 +378,7 @@ def _ansi_select(start_dir, pick_dir=False):
         e = _get_dir_entries(d)
         return [x for x in e if x[0] in ("up", "dir")] if pick_dir else e
 
-    current, tagged, cursor, scroll = start_dir, {}, 0, 0
+    current, tagged, tagged_dirs, cursor, scroll = start_dir, {}, set(), 0, 0
     entries = load(current)
 
     while True:
@@ -390,17 +396,18 @@ def _ansi_select(start_dir, pick_dir=False):
         vis = entries[scroll:scroll + list_h]
         for idx, (kind, name, full) in enumerate(vis):
             is_cur = (scroll + idx) == cursor
+            dir_tagged = full in tagged_dirs
             if kind in ("up", "dir"):
-                body = "<DIR>  " + name
+                body = ("[*] " if dir_tagged else "") + "<DIR>  " + name
             else:
                 body = ("[*]" if full in tagged else "[ ]") + "  " + name
             line = (("> " if is_cur else "  ") + body)[:W].ljust(W)
             if is_cur:
                 out.append(f"{_ESC}[7m{line}{_ESC}[0m")
+            elif dir_tagged or full in tagged:
+                out.append(f"{_ESC}[33;1m{line}{_ESC}[0m")
             elif kind in ("up", "dir"):
                 out.append(f"{_ESC}[36;1m{line}{_ESC}[0m")
-            elif full in tagged:
-                out.append(f"{_ESC}[33;1m{line}{_ESC}[0m")
             else:
                 out.append(line)
         out.extend([""] * (list_h - len(vis)))
@@ -450,12 +457,14 @@ def _ansi_select(start_dir, pick_dir=False):
                         else tagged.__setitem__(full, True)
                 elif kind == "dir":                 # tag ALL videos under it
                     vids = _videos_under(full)
-                    if vids and all(v in tagged for v in vids):
+                    if full in tagged_dirs:
                         for v in vids:
                             tagged.pop(v, None)
+                        tagged_dirs.discard(full)
                     else:
                         for v in vids:
                             tagged[v] = True
+                        tagged_dirs.add(full)
         elif k == "a" and not pick_dir:
             fps = [fp for kk, _, fp in entries if kk == "file"]
             if fps and all(fp in tagged for fp in fps):
