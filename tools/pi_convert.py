@@ -21,12 +21,20 @@ import sys
 import tempfile
 import time
 
-# msvcrt = built into Windows Python (no pip). Powers a curses-free browser.
+# Key input for the curses-free browser: msvcrt on Windows, termios on POSIX.
 try:
     import msvcrt
     HAS_MSVCRT = True
 except ImportError:
     HAS_MSVCRT = False
+
+try:
+    import termios
+    import tty
+    import select as _select
+    HAS_TERMIOS = True
+except ImportError:
+    HAS_TERMIOS = False
 
 # ── quality knobs (env-overridable) ───────────────────────────────────────────
 HEIGHT = os.environ.get("HEIGHT", "480")
@@ -347,16 +355,17 @@ def _curses_selector(stdscr, start_dir, pick_dir=False):
             return None
 
 
-# ── curses-free DOS browser (msvcrt + ANSI) — no pip, any Python ──────────────
-HAS_ANSI = HAS_MSVCRT  # ANSI browser is offered on Windows without curses
+# ── curses-free DOS browser (ANSI) — no pip, no terminfo, any Python ──────────
+# Works on Windows (msvcrt) and any POSIX VT terminal (termios), incl. screen.
+HAS_ANSI = ((HAS_MSVCRT or HAS_TERMIOS)
+            and sys.stdin.isatty() and sys.stdout.isatty())
 
 _ESC = "\x1b"
 
 
-def _read_key():
-    """One keypress → a normalized name. Windows msvcrt implementation."""
+def _read_key_win():
     ch = msvcrt.getwch()
-    if ch in ("\x00", "\xe0"):                 # special key: read the 2nd byte
+    if ch in ("\x00", "\xe0"):
         c2 = msvcrt.getwch()
         return {"H": "up", "P": "down", "K": "left", "M": "right",
                 "I": "pgup", "Q": "pgdn", "G": "home", "O": "end"}.get(c2, "")
@@ -369,6 +378,42 @@ def _read_key():
     if ch == " ":
         return "space"
     return ch.lower()
+
+
+def _read_key_posix():
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        ch = sys.stdin.read(1)
+        if ch == "\x1b":                       # escape or an arrow/nav sequence
+            seq = ""
+            while _select.select([sys.stdin], [], [], 0.001)[0]:
+                seq += sys.stdin.read(1)
+                if len(seq) >= 3:
+                    break
+            table = {"[A": "up", "[B": "down", "[C": "right", "[D": "left",
+                     "[H": "home", "[F": "end", "[5~": "pgup", "[6~": "pgdn"}
+            if seq in table:
+                return table[seq]
+            if seq.startswith("[5"):
+                return "pgup"
+            if seq.startswith("[6"):
+                return "pgdn"
+            return "quit" if seq == "" else ""
+        if ch in ("\r", "\n"):
+            return "enter"
+        if ch in ("\x7f", "\x08"):
+            return "backspace"
+        if ch == " ":
+            return "space"
+        return ch.lower()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+def _read_key():
+    return _read_key_win() if HAS_MSVCRT else _read_key_posix()
 
 
 def _ansi_select(start_dir, pick_dir=False):
@@ -497,21 +542,29 @@ def _ansi_select(start_dir, pick_dir=False):
 
 
 def interactive_select(files):
-    if HAS_CURSES:
-        result = curses.wrapper(_curses_selector, os.getcwd())
-        return [] if result is None else result
+    # ANSI browser first: no terminfo dependency, so it survives `screen`,
+    # bare TERM, etc. Curses only as a secondary path.
     if HAS_ANSI:
         result = _ansi_select(os.getcwd())
         return [] if result is None else result
+    if HAS_CURSES:
+        try:
+            result = curses.wrapper(_curses_selector, os.getcwd())
+            return [] if result is None else result
+        except Exception:
+            pass
     warn("No interactive browser available — using a text list.\n")
     return fallback_select(files)
 
 
 def interactive_pick_dir(start):
-    if HAS_CURSES:
-        return curses.wrapper(_curses_selector, start, True)
     if HAS_ANSI:
         return _ansi_select(start, True)
+    if HAS_CURSES:
+        try:
+            return curses.wrapper(_curses_selector, start, True)
+        except Exception:
+            return None
     return None
 
 
