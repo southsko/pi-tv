@@ -256,13 +256,26 @@ def interactive_pick_dir(start):
     return curses.wrapper(_curses_selector, start, True)
 
 
+def _videos_under(folder):
+    """All videos under folder, recursively; skips 'sample' files/folders."""
+    found = []
+    for dp, dn, files in os.walk(folder):
+        dn[:] = [d for d in dn if "sample" not in d.lower()]
+        for f in files:
+            if (os.path.splitext(f)[1].lower() in _VIDEO_EXTS
+                    and "sample" not in f.lower()
+                    and not f.startswith(".")):
+                found.append(os.path.join(dp, f))
+    return sorted(found)
+
+
 # ── native GUI picker (tkinter — bundled with Python, best on Windows) ────────
 def gui_select():
     """Return (files, out_dir) via native dialogs, or (None, None) if cancelled
     or GUI unavailable."""
     try:
         import tkinter as tk
-        from tkinter import filedialog
+        from tkinter import filedialog, messagebox
     except Exception:
         return None, None
     try:
@@ -271,20 +284,45 @@ def gui_select():
         root.attributes("-topmost", True)
     except Exception:
         return None, None
-    files = filedialog.askopenfilenames(
-        title="Select videos to convert (Ctrl/Shift-click for many)",
-        filetypes=[("Video files",
-                    "*.mp4 *.mkv *.mov *.avi *.m4v *.webm *.flv *.wmv"),
-                   ("All files", "*.*")])
-    if not files:
+
+    # folder (whole season) or individual files?
+    mode = messagebox.askyesnocancel(
+        "Pi TV Converter",
+        "Convert an entire folder?\n\n"
+        "Yes  =  pick a FOLDER (all videos in it and subfolders)\n"
+        "No   =  pick individual files\n"
+        "Cancel  =  quit")
+    if mode is None:
         root.destroy()
         return None, None
-    default_out = os.environ.get("PI_TV_OUT") or _output_dir(list(files))
+
+    if mode:  # folder
+        src = filedialog.askdirectory(title="Select the folder of videos")
+        if not src:
+            root.destroy()
+            return None, None
+        files = _videos_under(src)
+        if not files:
+            messagebox.showwarning("Pi TV Converter",
+                                   "No videos found in that folder.")
+            root.destroy()
+            return None, None
+    else:     # individual files
+        files = list(filedialog.askopenfilenames(
+            title="Select videos (Ctrl/Shift-click for many)",
+            filetypes=[("Video files",
+                        "*.mp4 *.mkv *.mov *.avi *.m4v *.webm *.flv *.wmv"),
+                       ("All files", "*.*")]))
+        if not files:
+            root.destroy()
+            return None, None
+
+    default_out = os.environ.get("PI_TV_OUT") or _output_dir(files)
     out = filedialog.askdirectory(
         title="Select OUTPUT folder (Cancel = default 'encoded')",
         initialdir=os.path.dirname(default_out) or os.getcwd())
     root.destroy()
-    return list(files), (out or default_out)
+    return files, (out or default_out)
 
 
 def choose_output(default):
