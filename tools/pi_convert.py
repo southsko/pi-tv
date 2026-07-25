@@ -24,37 +24,43 @@ HEIGHT = os.environ.get("HEIGHT", "480")
 CRF = os.environ.get("CRF", "23")
 PRESET = os.environ.get("PRESET", "fast")
 OUTPUT_SUBDIR = "encoded"
-# ENCODER: cpu (default), auto, nvenc (Nvidia), qsv (Intel), amf (AMD).
-# GPU modes are much faster; output stays Pi-decodable (H.264 baseline).
-ENCODER = os.environ.get("ENCODER", "cpu").lower()
 
 _CPU_VARGS = ['-c:v', 'libx264', '-profile:v', 'baseline', '-level', '3.0',
               '-preset', PRESET, '-crf', CRF, '-pix_fmt', 'yuv420p']
 
 
-def _have_encoder(name):
+def _encoder_works(vargs):
+    """True if ffmpeg can actually encode with these args (real GPU present)."""
     try:
-        r = subprocess.run(['ffmpeg', '-hide_banner', '-encoders'],
-                           capture_output=True, text=True)
-        return name in r.stdout
-    except OSError:
+        r = subprocess.run(
+            ['ffmpeg', '-hide_banner', '-f', 'lavfi', '-i',
+             'color=c=black:s=64x64:d=0.1'] + vargs
+            + ['-f', 'null', '-'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+        return r.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
         return False
 
 
 def _pick_vcodec():
-    """Return (video-args, label). Honors ENCODER, falls back to CPU."""
-    e = ENCODER
-    if e in ('nvenc', 'gpu', 'auto') and _have_encoder('h264_nvenc'):
-        return (['-c:v', 'h264_nvenc', '-profile:v', 'baseline',
-                 '-preset', 'p4', '-cq', CRF, '-pix_fmt', 'yuv420p'], 'nvenc')
-    if e in ('qsv', 'auto') and _have_encoder('h264_qsv'):
-        return (['-c:v', 'h264_qsv', '-profile:v', 'baseline',
-                 '-global_quality', CRF], 'qsv')
-    if e in ('amf', 'auto') and _have_encoder('h264_amf'):
-        return (['-c:v', 'h264_amf', '-profile:v', 'baseline',
-                 '-rc', 'cqp', '-qp_i', CRF, '-qp_p', CRF,
-                 '-pix_fmt', 'yuv420p'], 'amf')
-    return (_CPU_VARGS, 'cpu')
+    """Auto-detect a working GPU encoder; fall back to CPU only if none.
+
+    Order: Nvidia (NVENC) → Intel (QSV) → AMD (AMF) → CPU. Each candidate is
+    actually test-run, so we never pick a GPU encoder that's merely listed but
+    has no hardware behind it. Output stays H.264 baseline (Pi-decodable).
+    """
+    candidates = [
+        (['-c:v', 'h264_nvenc', '-profile:v', 'baseline',
+          '-preset', 'p4', '-cq', CRF, '-pix_fmt', 'yuv420p'], 'GPU (NVENC)'),
+        (['-c:v', 'h264_qsv', '-profile:v', 'baseline',
+          '-global_quality', CRF], 'GPU (QSV)'),
+        (['-c:v', 'h264_amf', '-profile:v', 'baseline', '-rc', 'cqp',
+          '-qp_i', CRF, '-qp_p', CRF, '-pix_fmt', 'yuv420p'], 'GPU (AMF)'),
+    ]
+    for vargs, label in candidates:
+        if _encoder_works(vargs):
+            return vargs, label
+    return _CPU_VARGS, 'CPU (no GPU found)'
 
 # ── colorama ──────────────────────────────────────────────────────────────────
 try:
@@ -498,13 +504,14 @@ def run_convert(selected, out_dir):
 
     os.makedirs(out_dir, exist_ok=True)
 
+    print(); info("Detecting GPU encoder...")
     vargs, enc = _pick_vcodec()
+    is_gpu = enc.startswith("GPU")
 
     print(); div()
     print(f"{Fore.CYAN}{Style.BRIGHT}  📺  CONVERTING {len(selected)} CLIP(S) → {HEIGHT}p Pi TV{Style.RESET_ALL}")
     info(f"Output  →  {Fore.WHITE}{Style.BRIGHT}{out_dir}{Style.RESET_ALL}")
-    info(f"Encoder →  {Fore.WHITE}{Style.BRIGHT}{enc}{Style.RESET_ALL}"
-         + ("" if enc != 'cpu' else "   (set ENCODER=auto to try GPU)"))
+    info(f"Encoder →  {Fore.WHITE}{Style.BRIGHT}{enc}{Style.RESET_ALL}")
     div(); print()
 
     done_names, ok_n, fail_n, skip_n = set(), 0, 0, 0
@@ -531,8 +538,8 @@ def run_convert(selected, out_dir):
         label = f"{counter} {short}"
         try:
             success = _convert_one(src, out, label, vargs)
-            if not success and enc != 'cpu':
-                warn(f"{enc} failed on this file — retrying on CPU")
+            if not success and is_gpu:
+                warn("GPU failed on this file — retrying on CPU")
                 if os.path.isfile(out):
                     os.remove(out)
                 success = _convert_one(src, out, label, _CPU_VARGS)
