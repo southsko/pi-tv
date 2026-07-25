@@ -50,12 +50,14 @@ def _pick_vcodec():
     actually test-run, so we never pick a GPU encoder that's merely listed but
     has no hardware behind it. Output stays H.264 baseline (Pi-decodable).
     """
+    # NOTE: modern GPUs (Ampere+) dropped H.264 *baseline* in their encoders,
+    # so GPU paths use High profile — the Pi's VideoCore decoder handles it.
     candidates = [
-        (['-c:v', 'h264_nvenc', '-profile:v', 'baseline',
+        (['-c:v', 'h264_nvenc', '-profile:v', 'high', '-level', '4.0',
           '-preset', 'p4', '-cq', CRF, '-pix_fmt', 'yuv420p'], 'GPU (NVENC)'),
-        (['-c:v', 'h264_qsv', '-profile:v', 'baseline',
-          '-global_quality', CRF], 'GPU (QSV)'),
-        (['-c:v', 'h264_amf', '-profile:v', 'baseline', '-rc', 'cqp',
+        (['-c:v', 'h264_qsv', '-profile:v', 'high',
+          '-global_quality', CRF, '-pix_fmt', 'nv12'], 'GPU (QSV)'),
+        (['-c:v', 'h264_amf', '-profile:v', 'high', '-rc', 'cqp',
           '-qp_i', CRF, '-qp_p', CRF, '-pix_fmt', 'yuv420p'], 'GPU (AMF)'),
     ]
     for vargs, label in candidates:
