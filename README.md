@@ -14,9 +14,11 @@ and adds channels, a channel-change static effect, and a web remote.
 | RPi.GPIO + raspi-gpio (both deprecated) | gpiozero + pinctrl |
 | One shuffled folder | Channels: every subfolder of `videos/` is a channel |
 | — | TV-static effect when changing channels |
-| — | Touchscreen gestures (the Waveshare 2.8" panel is capacitive touch) |
-| — | Web remote: play/pause, skip, channel, volume, upload episodes from your phone |
+| — | Touchscreen gestures + on-screen overlay (the Waveshare 2.8" panel is capacitive touch) |
+| — | Web remote + file manager: play/pause, skip, channel, volume, upload/rename/delete from your phone |
 | — | Remembers channel + volume across reboots |
+| — | exFAT data partition option (pop the card in Windows, drag episodes on) |
+| — | GPU-accelerated batch converter (`tools/pi_convert.py`) for prepping your library |
 
 ## Hardware
 
@@ -74,14 +76,48 @@ Pi Zero 2 W note: if greys look green on this screen, run
    videos/futurama/...
    videos/commercials/...
    ```
-   Encode to 480p H.264 baseline for smooth hardware-decoded playback. Easiest
-   way: drop `tools/encode.py` into a folder of source videos **on your PC**
-   (never the Pi — too slow) and run `python3 encode.py`; results land in
-   `./encoded/`, ready to copy into channel folders. Or by hand:
-   `ffmpeg -i in.mkv -vf scale=-2:480 -c:v libx264 -profile:v baseline -level 3.0 -c:a aac -ac 2 out.mp4`
+   Episodes should be 480p H.264 with AAC audio for smooth hardware-decoded
+   playback — see **Converting your videos** below for the tools that do this.
 
-The individual scripts (`install.sh`, `setup_share.sh`, `setup_exfat.sh`) can
-also be run on their own if you prefer piecemeal setup.
+The individual scripts (`install.sh`, `setup_share.sh`, `setup_exfat.sh`,
+`setup_screen.sh`, `speedup_boot.sh`) can also be run on their own if you prefer
+piecemeal setup. `setup.sh` also switches a Desktop image to console boot so the
+desktop can't fight mpv for the screen.
+
+## Converting your videos
+
+Source files (1080p, EAC3 5.1, etc.) won't play well on the Pi. Convert them to
+480p H.264 baseline + stereo AAC first — **on a real computer, never the Pi**
+(the Zero would take hours). Two tools in `tools/`:
+
+**`pi_convert.py` — interactive + scriptable, GPU-accelerated (recommended).**
+Auto-detects an NVIDIA/Intel/AMD GPU and uses hardware encode+decode (NVENC +
+NVDEC), falling back to CPU cleanly. Shows a live per-file progress bar with
+fps, speed, and a whole-queue ETA. Skips files already done, so it's safe to
+re-run.
+
+- **Just point it at folders (best for headless / Unraid / SSH):**
+  ```bash
+  python3 pi_convert.py "/path/to/The Simpsons" -o "/path/to/output"
+  ```
+  Converts every video under the folder (recursively, skipping "sample" files),
+  no menus.
+- **Interactive picker (no arguments):** a DOS-style file browser — arrows to
+  move, **Space** to tag a file or a whole folder (all episodes inside), **Enter**
+  to open, **F2** to convert, then choose/create the output folder. On Windows it
+  uses a native file dialog if the terminal browser isn't available.
+
+Requirements: `ffmpeg`/`ffprobe` on PATH. For GPU on Linux/Unraid use a build
+with NVENC (e.g. [BtbN's builds](https://github.com/BtbN/FFmpeg-Builds)) — some
+static builds omit it. On Unraid you also need the **Nvidia Driver** plugin so
+`nvidia-smi` works. Quality knobs via env: `CRF=20`, `HEIGHT=480`, `PRESET=fast`.
+
+**`encode.py` — simple batch, CPU.** Drop it next to source videos, run
+`python3 encode.py`; it walks all subfolders, flattens output into `./encoded/`,
+and skips samples. Good when you don't need the GPU or interactivity.
+
+By hand, the equivalent one-liner:
+`ffmpeg -i in.mkv -vf scale=-2:480 -c:v libx264 -profile:v baseline -level 3.0 -c:a aac -ac 2 out.mp4`
 
 ## Touchscreen
 
@@ -93,22 +129,28 @@ which shows up as a normal Linux input device — so the TV itself is a remote:
 | Tap | Show control overlay; while visible, taps hit its zones: top = CH+, bottom = CH-, left/right = seek, center = pause |
 | Swipe up / down | Next / previous channel (with static effect) |
 | Swipe left / right | Seek -30s / +30s |
-| Long press (0.8s) | Power toggle |
+| Hold right | **Skip** to next episode (plays the static transition) |
+| Hold center | Power toggle |
 
 The overlay stays up for `overlay_s` seconds (default 3) and refreshes on each
 tap, so you can chain channel taps. Prefer plain tap-to-pause? Set
 `touch.gestures.tap` to `"pause"`.
 
-Every gesture is remappable in `config.json` (`touch.gestures`) to any of:
-`pause`, `power`, `channel_up`, `channel_down`, `volume_up`, `volume_down`,
-`next_episode`, `seek_fwd`, `seek_back`, `none` — handy if you have the
-physical volume knob and want gestures for something else.
+Long-press is **zone-aware** — `hold_left/right/top/bottom/center` in
+`config.json` (`touch.gestures`) each take any action: `pause`, `power`,
+`channel_up`, `channel_down`, `volume_up`, `volume_down`, `next_episode`,
+`skip` (next episode with static), `seek_fwd`, `seek_back`, `overlay`, `none`.
+Taps and swipes are remappable the same way. Handy if you have the physical
+volume knob and want gestures for other things.
 
-Feedback appears as an on-screen OSD (channel name, volume). Configure in
-`config.json` under `touch` — set `rotate` to match your `display_rotate`
-(90 is right for the standard portrait-mounted build; if swipes feel
-backwards, try 270), or `enabled: false` to turn it off. Physical buttons
-remain optional and work alongside touch.
+Feedback appears as an on-screen OSD (channel name, volume, pause), drawn
+rotated to match the video. In `config.json`: `touch.rotate` and `osd_rotate`
+should match your `--video-rotate` (all default to **270** for the standard
+portrait-mounted build; if it's upside-down or swipes feel backwards, try 90).
+`osd_font_size` sizes the overlay text; `static_volume` (default 40) sets how
+loud the channel-change static plays vs normal programming. `touch.enabled:
+false` turns touch off. Physical buttons remain optional and work alongside
+touch.
 
 ## Web remote + file manager
 
@@ -185,10 +227,18 @@ see multiple partitions on an SD card; macOS reads exFAT fine too.
 - `mpv_ipc.py` — minimal mpv JSON-IPC client, no pip dependencies
 - `channels.py` — channel/shuffle/state logic
 - `hardware.py` — buttons, backlight, amp (safe no-op off-Pi)
-- `webui.py` — Flask web remote
-- `config.json` — pins, port, mpv flags
+- `touch.py` — touchscreen gestures (evdev)
+- `webui.py` — Flask web remote + file manager
+- `config.json` — pins, port, mpv flags, touch gestures, rotation
+- `setup.sh` — one-shot installer (calls the rest)
+- `install.sh`, `simpsonstv.service` — core install
+- `setup_screen.sh` — Waveshare 2.8" DPI screen + audio config
+- `setup_share.sh` — Samba share
+- `setup_exfat.sh` — grow root + mount exFAT data partition
+- `speedup_boot.sh` — trims services, WiFi power-save, boot splash
 - `make_static.sh` — regenerates the static-effect clip
-- `install.sh`, `simpsonstv.service` — setup
+- `partition_card.ps1` / `prepare_card.ps1` — Windows exFAT card prep
+- `tools/pi_convert.py`, `tools/encode.py` — video converters (see above)
 
 ## Testing without a Pi
 
@@ -197,18 +247,25 @@ no-ops and mpv opens a window. Handy for testing channels and the web UI.
 
 ## Troubleshooting
 
-- Video sideways/portrait: the panel is natively portrait; mpv rotates it with
-  `--video-rotate=90` in `config.json`'s `mpv_args`. Upside down? Use `270`
-  (and flip `touch.rotate` to `270` to match).
+- Video sideways/upside-down: mpv rotates the portrait panel via
+  `--video-rotate` in `config.json`'s `mpv_args` (default **270**). Try `90` if
+  it's flipped, and set `touch.rotate` + `osd_rotate` to match.
 - No sound: check `aplay -l` shows a `Headphones` card; `/etc/asound.conf` must
-  point defaults at it (setup_screen.sh does this). The audremap overlay needs
-  `enable_jack`.
-- Black screen but audio plays: check `mpv_args` in `config.json`. On some display
-  setups `--vo=drm` works better than `--vo=gpu --gpu-context=drm`.
+  point ALSA's default at it (setup_screen.sh writes this). The audremap overlay
+  needs `enable_jack`. `speaker-test -D default -t sine` is a quick check.
+- Choppy / low framerate playback: the source isn't 480p, or hardware decode
+  isn't active. Re-encode with the converter (see **Converting your videos**);
+  playback uses `--hwdec=v4l2m2m-copy` (the Pi's hardware H.264 decoder).
+- Boots to a desktop / greeter steals the screen: you flashed Desktop, not Lite.
+  `sudo systemctl set-default multi-user.target && sudo systemctl disable lightdm`
+  (or just run `setup.sh`, which does this).
+- Black screen but audio plays: check `mpv_args`. On some setups `--vo=drm` beats
+  `--vo=gpu --gpu-context=drm`. A bare-panel white screen at boot is normal until
+  the player takes over (setup keeps the backlight off until then).
 - Backlight doesn't switch: your display may use a different enable pin; adjust
   `pins.backlight`.
+- SSH laggy / drops: Zero W WiFi power-save — `speedup_boot.sh` disables it.
 - Logs: `journalctl -u simpsonstv -f`
-- Slow boot: run `bash speedup_boot.sh` (disables bluetooth/printing/etc.,
-  firmware boot tweaks, starts the player before the network is up). The Lite
-  image boots much faster than Desktop to begin with. Profile stragglers with
-  `systemd-analyze blame`.
+- Slow boot: run `bash speedup_boot.sh` (disables bluetooth/printing, removes the
+  boot splash, starts the player before the network). Lite boots far faster than
+  Desktop. Profile stragglers with `systemd-analyze blame`.
