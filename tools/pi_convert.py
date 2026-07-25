@@ -98,7 +98,7 @@ def _get_dir_entries(directory):
 
 
 # ── DOS-style navigable file browser ──────────────────────────────────────────
-def _curses_selector(stdscr, start_dir):
+def _curses_selector(stdscr, start_dir, pick_dir=False):
     curses.curs_set(0)
     curses.start_color()
     HAS_CLR = curses.has_colors()
@@ -121,9 +121,13 @@ def _curses_selector(stdscr, start_dir):
         C_BAR = curses.A_REVERSE
         C_FLAB = curses.A_NORMAL
 
+    def load(d):
+        e = _get_dir_entries(d)
+        return [x for x in e if x[0] in ('up', 'dir')] if pick_dir else e
+
     current_dir = start_dir
     tagged, cursor, scroll = {}, 0, 0
-    entries = _get_dir_entries(current_dir)
+    entries = load(current_dir)
 
     while True:
         h, w = stdscr.getmaxyx()
@@ -157,15 +161,20 @@ def _curses_selector(stdscr, start_dir):
             try: stdscr.addstr(row, 0, line, attr)
             except Exception: pass
 
-        hint = ('  ' + str(len(tagged)) + ' tagged  |  Sp=tag  Enter=open  '
-                'Bksp=up  A=all  F2=convert  Q=quit')
+        if pick_dir:
+            hint = '  Enter=open folder  Bksp=up  F2=CHOOSE THIS FOLDER  Q=cancel'
+        else:
+            hint = ('  ' + str(len(tagged)) + ' tagged  |  Sp=tag  Enter=open  '
+                    'Bksp=up  A=all  F2=convert  Q=quit')
         try: stdscr.addstr(h - 2, 0, hint[:W].ljust(W), C_BAR)
         except Exception: pass
 
         try: stdscr.addstr(h - 1, 0, ' ' * W, C_FLAB)
         except Exception: pass
         x = 0
-        for num, lbl in [('2','Convert'),('5','TagAll'),('8','Clear'),('10','Quit')]:
+        fkeys = ([('2','Choose'),('10','Cancel')] if pick_dir
+                 else [('2','Convert'),('5','TagAll'),('8','Clear'),('10','Quit')])
+        for num, lbl in fkeys:
             seg = num + lbl + '  '
             if x + len(seg) > W: break
             try:
@@ -200,16 +209,16 @@ def _curses_selector(stdscr, start_dir):
                 kind, name, full_path = entries[cursor]
                 if kind in ('up', 'dir'):
                     current_dir = full_path
-                    entries = _get_dir_entries(current_dir)
+                    entries = load(current_dir)
                     cursor = scroll = 0
-                else:
+                elif not pick_dir:
                     tagged.pop(full_path, None) if full_path in tagged \
                         else tagged.__setitem__(full_path, True)
         elif key in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 8, 127, 263):
             parent = os.path.dirname(current_dir)
             if os.path.normcase(parent) != os.path.normcase(current_dir):
                 current_dir = parent
-                entries = _get_dir_entries(current_dir)
+                entries = load(current_dir)
                 cursor = scroll = 0
         elif key == ord(' '):
             if entries:
@@ -227,7 +236,7 @@ def _curses_selector(stdscr, start_dir):
             for k, _, fp in entries:
                 if k == 'file': tagged.pop(fp, None)
         elif key in (curses.KEY_F2, ord('m'), ord('M'), ord('c'), ord('C')):
-            return list(tagged.keys())
+            return current_dir if pick_dir else list(tagged.keys())
         elif key in (curses.KEY_F10, ord('q'), ord('Q')):
             return None
 
@@ -239,6 +248,36 @@ def interactive_select(files):
         return fallback_select(files)
     result = curses.wrapper(_curses_selector, os.getcwd())
     return [] if result is None else result
+
+
+def interactive_pick_dir(start):
+    if not HAS_CURSES:
+        return None
+    return curses.wrapper(_curses_selector, start, True)
+
+
+def choose_output(default):
+    """Let the user keep the default, paste a path, or browse to a folder."""
+    print()
+    info(f"Default output: {Fore.WHITE}{Style.BRIGHT}{default}{Style.RESET_ALL}")
+    prompt = (f"{Fore.YELLOW}Output folder — ENTER=default"
+              + (", B=browse" if HAS_CURSES else "")
+              + f", or paste a path:{Style.RESET_ALL} ")
+    resp = input(prompt).strip().strip('"').strip("'")
+    if resp == "":
+        return default
+    if resp.lower() == "b" and HAS_CURSES:
+        picked = interactive_pick_dir(os.path.dirname(default) or os.getcwd())
+        return picked or default
+    path = os.path.abspath(os.path.expanduser(resp))
+    if not os.path.isdir(path):
+        try:
+            os.makedirs(path, exist_ok=True)
+            info(f"Created {path}")
+        except OSError as e:
+            warn(f"Can't use {path} ({e}); using default.")
+            return default
+    return path
 
 
 def fallback_select(files):
@@ -267,12 +306,11 @@ def _output_dir(selected):
     return os.path.join(base, OUTPUT_SUBDIR)
 
 
-def run_convert(selected):
+def run_convert(selected, out_dir):
     if not selected:
         warn("No files selected.")
         return
 
-    out_dir = _output_dir(selected)
     os.makedirs(out_dir, exist_ok=True)
 
     print(); div()
@@ -343,7 +381,9 @@ if __name__ == "__main__":
         info(f"{len(selected)} clip(s) selected:")
         for f in selected:
             print(f"  {Fore.WHITE}→  {os.path.basename(f)}{Style.RESET_ALL}")
-        run_convert(selected)
+        default_out = os.environ.get("PI_TV_OUT") or _output_dir(selected)
+        out_dir = choose_output(os.path.abspath(default_out))
+        run_convert(selected, out_dir)
 
     print(); div()
     input(f"{Fore.GREEN}✅  Done. Press ENTER to exit...{Style.RESET_ALL}  ")
