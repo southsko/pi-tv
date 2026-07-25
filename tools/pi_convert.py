@@ -909,25 +909,68 @@ def run_convert(selected, out_dir):
     div()
 
 
-def main():
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+def _expand_inputs(inputs):
+    """Files and/or folders → flat list of videos (folders recurse, skips
+    'sample' items). De-duplicated, keeps order."""
+    files, seen, out = [], set(), []
+    for item in inputs:
+        item = os.path.abspath(os.path.expanduser(item))
+        if os.path.isdir(item):
+            files.extend(_videos_under(item))
+        elif os.path.isfile(item):
+            files.append(item)
+        else:
+            warn(f"Not found: {item}")
+    for f in files:
+        if f.lower() not in seen:
+            seen.add(f.lower())
+            out.append(f)
+    return out
+
+
+def main(argv=None):
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Convert videos to Pi TV format (480p H.264 + AAC). "
+                    "Give folders/files to run without any menu; give nothing "
+                    "for the interactive picker.")
+    parser.add_argument("inputs", nargs="*",
+                        help="video files and/or folders (folders recurse)")
+    parser.add_argument("-o", "--output", metavar="DIR",
+                        help="output folder (default: ./encoded by the sources)")
+    args = parser.parse_args(argv)
+
     if not HAS_COLOR:
         print("[NOTE] pip install colorama  for coloured output")
     print(BANNER)
 
+    # ── command-line mode: no browser, works headless / over SSH ──────────
+    # (paths resolved against the current dir — do NOT chdir here)
+    if args.inputs:
+        selected = _expand_inputs(args.inputs)
+        if not selected:
+            warn("No videos found in the given paths.")
+            return
+        out_dir = (os.path.abspath(os.path.expanduser(args.output))
+                   if args.output else _output_dir(selected))
+        info(f"{len(selected)} clip(s) to convert  →  {out_dir}")
+        run_convert(selected, out_dir)
+        return
+
+    # ── interactive mode (no args): browser, else GUI, else text ──────────
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
     selected, out_dir = (None, None)
-    want_gui = os.environ.get("PI_TV_GUI")   # set to force the native GUI
+    want_gui = os.environ.get("PI_TV_GUI")
 
     if (HAS_CURSES or HAS_ANSI) and not want_gui:
-        # the DOS-style file browser (the original experience, no pip needed)
         input(f"{Fore.YELLOW}  Press ENTER to open the file browser...{Style.RESET_ALL}  ")
         selected = interactive_select(find_video_files())
         if selected:
             default_out = os.environ.get("PI_TV_OUT") or _output_dir(selected)
             out_dir = choose_output(os.path.abspath(default_out))
     else:
-        selected, out_dir = gui_select()     # native dialogs
-        if selected is None:                 # GUI also unavailable → text list
+        selected, out_dir = gui_select()
+        if selected is None:
             selected = interactive_select(find_video_files())
             if selected:
                 default_out = os.environ.get("PI_TV_OUT") or _output_dir(selected)
