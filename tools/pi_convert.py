@@ -1,0 +1,349 @@
+#!/usr/bin/env python3
+"""Pi TV Converter — interactive ffmpeg batch converter.
+
+A DOS-style file browser (tag clips with Space, F2 to convert) that re-encodes
+the selected videos into the format the Pi TV player's hardware decoder plays
+smoothly: H.264 baseline 480p + stereo AAC. Output lands in an ./encoded/
+folder next to the sources.
+
+Run on your PC (never the Pi — encoding is far too slow there):
+    pip install colorama            # optional, nicer colours
+    pip install windows-curses      # Windows only, for the browser
+    python3 pi_convert.py
+
+Adapted from southsko/drone-footage-merger.
+"""
+import glob
+import json
+import os
+import subprocess
+
+# ── quality knobs (env-overridable) ───────────────────────────────────────────
+HEIGHT = os.environ.get("HEIGHT", "480")
+CRF = os.environ.get("CRF", "23")
+PRESET = os.environ.get("PRESET", "fast")
+OUTPUT_SUBDIR = "encoded"
+
+# ── colorama ──────────────────────────────────────────────────────────────────
+try:
+    from colorama import init, Fore, Back, Style
+    init(autoreset=True)
+    HAS_COLOR = True
+except ImportError:
+    HAS_COLOR = False
+    class _D:
+        def __getattr__(self, _): return ''
+    Fore = Back = Style = _D()
+
+# ── curses (needs 'windows-curses' on Windows) ────────────────────────────────
+try:
+    import curses
+    HAS_CURSES = True
+except ImportError:
+    HAS_CURSES = False
+
+VIDEO_EXTENSIONS = ['*.mp4', '*.mov', '*.avi', '*.mkv', '*.m4v', '*.webm',
+                    '*.flv', '*.wmv', '*.MP4', '*.MOV', '*.AVI', '*.MKV']
+_VIDEO_EXTS = {os.path.splitext(p)[1].lower() for p in VIDEO_EXTENSIONS}
+
+BANNER = f"""
+{Back.BLUE}{Fore.WHITE}{Style.BRIGHT}
+  ╔══════════════════════════════════════════════════════════╗
+  ║          📺  PI TV CONVERTER  v1.0                       ║
+  ║        480p H.264 baseline + AAC · Powered by FFmpeg     ║
+  ╚══════════════════════════════════════════════════════════╝
+{Style.RESET_ALL}"""
+
+
+def info(m):  print(f"{Fore.CYAN}{Style.BRIGHT}[INFO]{Style.RESET_ALL}  {m}")
+def warn(m):  print(f"{Fore.YELLOW}{Style.BRIGHT}[WARN]{Style.RESET_ALL}  {m}")
+def err(m):   print(f"{Fore.RED}{Style.BRIGHT}[ERR] {Style.RESET_ALL}  {m}")
+def ok(m):    print(f"{Fore.GREEN}{Style.BRIGHT}[OK]  {Style.RESET_ALL}  {m}")
+def div():    print(f"{Fore.BLUE}{Style.BRIGHT}{'─'*62}{Style.RESET_ALL}")
+
+
+# ── file discovery (text fallback only) ───────────────────────────────────────
+def find_video_files():
+    files, seen, unique = [], set(), []
+    for pat in VIDEO_EXTENSIONS:
+        files.extend(glob.glob(pat))
+    for f in sorted(files):
+        k = f.lower()
+        if k not in seen:
+            seen.add(k)
+            unique.append(f)
+    return unique
+
+
+def _get_dir_entries(directory):
+    """(kind, name, full_path) tuples; dirs before video files."""
+    entries = []
+    parent = os.path.dirname(directory)
+    if os.path.normcase(parent) != os.path.normcase(directory):
+        entries.append(('up', '..', parent))
+    try:
+        items = sorted(os.listdir(directory), key=str.lower)
+    except (PermissionError, OSError):
+        return entries
+    dirs, vids = [], []
+    for item in items:
+        full = os.path.join(directory, item)
+        if os.path.isdir(full):
+            dirs.append(('dir', item, full))
+        elif os.path.splitext(item)[1].lower() in _VIDEO_EXTS:
+            vids.append(('file', item, full))
+    entries.extend(dirs)
+    entries.extend(vids)
+    return entries
+
+
+# ── DOS-style navigable file browser ──────────────────────────────────────────
+def _curses_selector(stdscr, start_dir):
+    curses.curs_set(0)
+    curses.start_color()
+    HAS_CLR = curses.has_colors()
+    if HAS_CLR:
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_WHITE,  curses.COLOR_BLUE)
+        curses.init_pair(2, curses.COLOR_YELLOW, curses.COLOR_BLUE)
+        curses.init_pair(3, curses.COLOR_CYAN,   curses.COLOR_BLUE)
+        curses.init_pair(4, curses.COLOR_BLACK,  curses.COLOR_WHITE)
+        curses.init_pair(5, curses.COLOR_YELLOW, curses.COLOR_BLACK)
+        C_BLUE = curses.color_pair(1)
+        C_TAG  = curses.color_pair(2) | curses.A_BOLD
+        C_DIR  = curses.color_pair(3) | curses.A_BOLD
+        C_BAR  = curses.color_pair(4) | curses.A_BOLD
+        C_FNUM = curses.color_pair(5) | curses.A_BOLD
+        C_FLAB = curses.color_pair(4)
+    else:
+        C_BLUE = curses.A_NORMAL
+        C_TAG = C_DIR = C_FNUM = curses.A_BOLD
+        C_BAR = curses.A_REVERSE
+        C_FLAB = curses.A_NORMAL
+
+    current_dir = start_dir
+    tagged, cursor, scroll = {}, 0, 0
+    entries = _get_dir_entries(current_dir)
+
+    while True:
+        h, w = stdscr.getmaxyx()
+        stdscr.clear()
+        W = w - 1
+        ENTRY_TOP, ENTRY_BOT = 2, h - 3
+        list_h = max(0, ENTRY_BOT - ENTRY_TOP + 1)
+
+        if HAS_CLR:
+            for r in range(h - 2):
+                try: stdscr.addstr(r, 0, ' ' * W, C_BLUE)
+                except Exception: pass
+        try: stdscr.addstr(0, 0, (' ' + current_dir)[:W].ljust(W), C_BAR)
+        except Exception: pass
+        try: stdscr.addstr(1, 0, ('=' * W)[:W], curses.A_BOLD)
+        except Exception: pass
+
+        for idx, (kind, name, full_path) in enumerate(entries[scroll:scroll + list_h]):
+            abs_i = scroll + idx
+            is_cur = abs_i == cursor
+            row = ENTRY_TOP + idx
+            if kind in ('up', 'dir'):
+                body = '<DIR>  ' + name
+                attr = curses.A_REVERSE if is_cur else C_DIR
+            else:
+                mark = '[*]' if full_path in tagged else '[ ]'
+                body = mark + '  ' + name
+                attr = (curses.A_REVERSE if is_cur
+                        else C_TAG if full_path in tagged else curses.A_BOLD)
+            line = (('> ' if is_cur else '  ') + body)[:W].ljust(W)
+            try: stdscr.addstr(row, 0, line, attr)
+            except Exception: pass
+
+        hint = ('  ' + str(len(tagged)) + ' tagged  |  Sp=tag  Enter=open  '
+                'Bksp=up  A=all  F2=convert  Q=quit')
+        try: stdscr.addstr(h - 2, 0, hint[:W].ljust(W), C_BAR)
+        except Exception: pass
+
+        try: stdscr.addstr(h - 1, 0, ' ' * W, C_FLAB)
+        except Exception: pass
+        x = 0
+        for num, lbl in [('2','Convert'),('5','TagAll'),('8','Clear'),('10','Quit')]:
+            seg = num + lbl + '  '
+            if x + len(seg) > W: break
+            try:
+                stdscr.addstr(h - 1, x, num, C_FNUM)
+                stdscr.addstr(h - 1, x + len(num), lbl + '  ', C_FLAB)
+            except Exception: pass
+            x += len(seg)
+
+        stdscr.refresh()
+        key = stdscr.getch()
+
+        if key in (curses.KEY_UP, ord('k')):
+            if cursor > 0:
+                cursor -= 1
+                if cursor < scroll: scroll = cursor
+        elif key in (curses.KEY_DOWN, ord('j')):
+            if cursor < len(entries) - 1:
+                cursor += 1
+                if cursor >= scroll + list_h: scroll = cursor - list_h + 1
+        elif key == curses.KEY_PPAGE:
+            cursor = max(0, cursor - list_h); scroll = max(0, scroll - list_h)
+        elif key == curses.KEY_NPAGE:
+            cursor = min(len(entries) - 1, cursor + list_h)
+            if cursor >= scroll + list_h: scroll = cursor - list_h + 1
+        elif key == curses.KEY_HOME:
+            cursor = scroll = 0
+        elif key == curses.KEY_END:
+            cursor = max(0, len(entries) - 1)
+            scroll = max(0, cursor - list_h + 1)
+        elif key in (curses.KEY_ENTER, ord('\n'), ord('\r'), curses.KEY_RIGHT):
+            if entries:
+                kind, name, full_path = entries[cursor]
+                if kind in ('up', 'dir'):
+                    current_dir = full_path
+                    entries = _get_dir_entries(current_dir)
+                    cursor = scroll = 0
+                else:
+                    tagged.pop(full_path, None) if full_path in tagged \
+                        else tagged.__setitem__(full_path, True)
+        elif key in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 8, 127, 263):
+            parent = os.path.dirname(current_dir)
+            if os.path.normcase(parent) != os.path.normcase(current_dir):
+                current_dir = parent
+                entries = _get_dir_entries(current_dir)
+                cursor = scroll = 0
+        elif key == ord(' '):
+            if entries:
+                kind, name, full_path = entries[cursor]
+                if kind == 'file':
+                    tagged.pop(full_path, None) if full_path in tagged \
+                        else tagged.__setitem__(full_path, True)
+        elif key in (curses.KEY_F5, ord('a'), ord('A')):
+            fps = [fp for k, _, fp in entries if k == 'file']
+            if fps and all(fp in tagged for fp in fps):
+                for fp in fps: tagged.pop(fp, None)
+            else:
+                for fp in fps: tagged[fp] = True
+        elif key == curses.KEY_F8:
+            for k, _, fp in entries:
+                if k == 'file': tagged.pop(fp, None)
+        elif key in (curses.KEY_F2, ord('m'), ord('M'), ord('c'), ord('C')):
+            return list(tagged.keys())
+        elif key in (curses.KEY_F10, ord('q'), ord('Q')):
+            return None
+
+
+def interactive_select(files):
+    if not HAS_CURSES:
+        warn("curses not available. On Windows:  pip install windows-curses")
+        warn("Falling back to text input.\n")
+        return fallback_select(files)
+    result = curses.wrapper(_curses_selector, os.getcwd())
+    return [] if result is None else result
+
+
+def fallback_select(files):
+    print("\n--- Videos in this folder ---")
+    for i, f in enumerate(files):
+        print(f"  [{i+1}] {os.path.basename(f)}")
+    print("Enter numbers (e.g. 1,3,4) or ALL / DONE:\n")
+    while True:
+        s = input("> ").strip()
+        if s.upper() == 'DONE': return []
+        if s.upper() == 'ALL':  return files
+        try:
+            idxs = [int(x.strip())-1 for x in s.split(',') if x.strip()]
+            if all(0 <= i < len(files) for i in idxs):
+                return [files[i] for i in idxs]
+            warn("Invalid index.")
+        except ValueError:
+            warn("Use comma-separated numbers.")
+
+
+# ── convert ───────────────────────────────────────────────────────────────────
+def _output_dir(selected):
+    paths = [os.path.abspath(f) for f in selected]
+    common = os.path.commonpath(paths)
+    base = common if os.path.isdir(common) else os.path.dirname(common)
+    return os.path.join(base, OUTPUT_SUBDIR)
+
+
+def run_convert(selected):
+    if not selected:
+        warn("No files selected.")
+        return
+
+    out_dir = _output_dir(selected)
+    os.makedirs(out_dir, exist_ok=True)
+
+    print(); div()
+    print(f"{Fore.CYAN}{Style.BRIGHT}  📺  CONVERTING {len(selected)} CLIP(S) → {HEIGHT}p Pi TV{Style.RESET_ALL}")
+    info(f"Output  →  {Fore.WHITE}{Style.BRIGHT}{out_dir}{Style.RESET_ALL}")
+    div(); print()
+
+    done_names, ok_n, fail_n, skip_n = set(), 0, 0, 0
+    for src in sorted(selected):
+        base = os.path.splitext(os.path.basename(src))[0]
+        name = base + ".mp4"
+        if name in done_names:
+            n = 2
+            while f"{base} ({n}).mp4" in done_names:
+                n += 1
+            name = f"{base} ({n}).mp4"
+        done_names.add(name)
+        out = os.path.join(out_dir, name)
+
+        if os.path.isfile(out):
+            print(f"  {Fore.YELLOW}skip{Style.RESET_ALL}  {name} (exists)")
+            skip_n += 1
+            continue
+
+        print(f"  {Fore.CYAN}conv{Style.RESET_ALL}  {os.path.basename(src)} → {name}")
+        cmd = [
+            'ffmpeg', '-y', '-i', src,
+            '-vf', 'scale=-2:%s' % HEIGHT,
+            '-c:v', 'libx264', '-profile:v', 'baseline', '-level', '3.0',
+            '-preset', PRESET, '-crf', CRF, '-pix_fmt', 'yuv420p',
+            '-c:a', 'aac', '-ac', '2', '-b:a', '128k',
+            '-movflags', '+faststart',
+            out,
+        ]
+        try:
+            r = subprocess.run(cmd, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.PIPE)
+        except FileNotFoundError:
+            err("'ffmpeg' not found — install it / check PATH.")
+            return
+        if r.returncode == 0:
+            ok_n += 1
+        else:
+            fail_n += 1
+            if os.path.isfile(out):
+                os.remove(out)
+            print(f"    {Fore.RED}FAILED{Style.RESET_ALL}")
+            for line in r.stderr.decode('utf-8', 'replace').strip().splitlines()[-2:]:
+                print(f"      {line}")
+
+    print(); div()
+    ok(f"{ok_n} converted, {skip_n} skipped, {fail_n} failed  →  {out_dir}")
+    div()
+
+
+if __name__ == "__main__":
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    if not HAS_COLOR:
+        print("[NOTE] pip install colorama  for coloured output")
+    print(BANNER)
+    input(f"{Fore.YELLOW}  Press ENTER to open the file browser...{Style.RESET_ALL}  ")
+
+    selected = interactive_select(find_video_files())
+    print(BANNER)
+    if not selected:
+        warn("Nothing selected — nothing to do.")
+    else:
+        info(f"{len(selected)} clip(s) selected:")
+        for f in selected:
+            print(f"  {Fore.WHITE}→  {os.path.basename(f)}{Style.RESET_ALL}")
+        run_convert(selected)
+
+    print(); div()
+    input(f"{Fore.GREEN}✅  Done. Press ENTER to exit...{Style.RESET_ALL}  ")
