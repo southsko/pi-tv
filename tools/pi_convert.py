@@ -238,8 +238,8 @@ def _curses_selector(stdscr, start_dir, pick_dir=False):
         if pick_dir:
             hint = '  Enter=open  Bksp=up  N=new folder  F2=CHOOSE HERE  Q=cancel'
         else:
-            hint = ('  ' + str(len(tagged)) + ' tagged  |  Sp=tag  Enter=open  '
-                    'Bksp=up  A=all  F2=convert  Q=quit')
+            hint = ('  ' + str(len(tagged)) + ' tagged  |  Sp=tag (folder=all '
+                    'inside)  Enter=open  Bksp=up  F2=convert  Q=quit')
         try: stdscr.addstr(h - 2, 0, hint[:W].ljust(W), C_BAR)
         except Exception: pass
 
@@ -300,6 +300,12 @@ def _curses_selector(stdscr, start_dir, pick_dir=False):
                 if kind == 'file':
                     tagged.pop(full_path, None) if full_path in tagged \
                         else tagged.__setitem__(full_path, True)
+                elif kind == 'dir':                 # tag ALL videos under it
+                    vids = _videos_under(full_path)
+                    if vids and all(v in tagged for v in vids):
+                        for v in vids: tagged.pop(v, None)
+                    else:
+                        for v in vids: tagged[v] = True
         elif key in (curses.KEY_F5, ord('a'), ord('A')):
             fps = [fp for k, _, fp in entries if k == 'file']
             if fps and all(fp in tagged for fp in fps):
@@ -401,8 +407,8 @@ def _ansi_select(start_dir, pick_dir=False):
         if pick_dir:
             hint = "  Enter=open  Bksp=up  N=new folder  C=CHOOSE HERE  Q=cancel"
         else:
-            hint = (f"  {len(tagged)} tagged | Space=tag  Enter=open  Bksp=up"
-                    "  A=all  C=convert  Q=quit")
+            hint = (f"  {len(tagged)} tagged | Space=tag (folder=all inside)"
+                    "  Enter=open  Bksp=up  C=convert  Q=quit")
         out.append(f"{_ESC}[44;37;1m{hint[:W].ljust(W)}{_ESC}[0m")
         sys.stdout.write("\n".join(out))
         sys.stdout.flush()
@@ -442,6 +448,14 @@ def _ansi_select(start_dir, pick_dir=False):
                 if kind == "file":
                     tagged.pop(full, None) if full in tagged \
                         else tagged.__setitem__(full, True)
+                elif kind == "dir":                 # tag ALL videos under it
+                    vids = _videos_under(full)
+                    if vids and all(v in tagged for v in vids):
+                        for v in vids:
+                            tagged.pop(v, None)
+                    else:
+                        for v in vids:
+                            tagged[v] = True
         elif k == "a" and not pick_dir:
             fps = [fp for kk, _, fp in entries if kk == "file"]
             if fps and all(fp in tagged for fp in fps):
