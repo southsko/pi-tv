@@ -283,6 +283,55 @@ simpsonstv`). Defaults shown.
 `python3 tv.py` runs on any Linux box with mpv installed — GPIO calls become
 no-ops and mpv opens a window. Handy for testing channels and the web UI.
 
+## Power-loss hardening (unplug-safe) — read before modifying the device
+
+This is a portable, USB-powered unit that gets **unplugged with no clean
+shutdown**. An unclean power-off can leave the SD card's ext4 root with
+half-written data — which once zeroed `tv.py` and left the service crash-looping.
+The measures below make it survive a yank. Understand them before you change
+**anything on the device**, because the self-heal can roll a bad edit back.
+
+- **Self-heal on boot.** `simpsonstv.service` runs an `ExecStartPre` hook
+  (`/home/joey/pi-tv-golden/heal.sh`) that, on every start, restores any app
+  source file (`*.py`, `static.mp4`, `config.json`) that is **missing,
+  zero-length, or fails to compile** from a golden copy at
+  `/home/joey/pi-tv-golden/`. A corrupted file therefore fixes itself on the next
+  boot — verified by zeroing `tv.py` and cold-booting.
+- **⚠️ After editing app/config files on the device, refresh the golden copy** —
+  otherwise your change isn't protected, and if the edit has a syntax error it is
+  **rolled back** to the golden version on the next start:
+  ```bash
+  cp -a /home/joey/pi-tv/*.py /home/joey/pi-tv/static.mp4 \
+        /home/joey/pi-tv/config.json /home/joey/pi-tv-golden/ && sync
+  ```
+  A *valid* edit is never reverted (heal only triggers on missing/empty/broken
+  files), but keeping golden current means a future corruption restores your
+  latest version, not an old one.
+- **Logs go to RAM.** `journald` is set to `Storage=volatile`, so nothing is
+  written to the SD card for logging during normal operation. `journalctl` shows
+  the current boot only; logs don't persist across reboot.
+- **State on the journaled root.** `state.json` (last channel + volume) is written
+  atomically to the ext4 root (power-safe), **not** to the exFAT video partition —
+  so playback performs no writes to the video partition and a yank can't corrupt
+  your episode library.
+- **❌ Do NOT enable the overlay filesystem** (`raspi-config` → Performance →
+  Overlay FS, or the `overlayroot` package). It hangs on the first boot on this
+  Waveshare DPI board. If it ever gets enabled and the Pi won't boot: power off,
+  pull the SD card, open the `bootfs` (FAT) partition on another computer, remove
+  `overlayroot=tmpfs` from `cmdline.txt`, change `auto_initramfs=1` to
+  `#auto_initramfs=1` in `config.txt` (save as plain ASCII, **no BOM**), reinsert,
+  and boot.
+
+A short version of this — plus the live web-remote and Samba URLs — is shown as
+the SSH message-of-the-day (`/etc/update-motd.d/99-pitv`, IP resolved at login so
+it's DHCP-safe).
+
+**Modifying the system safely:** the root is ordinary read-write ext4 — edit
+files and install packages as usual; the only special rule is the golden-copy
+refresh above. Run `sudo sync` before unplugging after any significant change, and
+prefer to unplug while idle. To deploy from git: `cd ~/pi-tv && git pull`, refresh
+the golden copy, then `sudo systemctl restart simpsonstv`.
+
 ## Troubleshooting
 
 - Video sideways/upside-down: mpv rotates the portrait panel via
