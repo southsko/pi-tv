@@ -31,6 +31,7 @@ else
   echo "    [videos] share already present, leaving it alone."
 fi
 
+sudo systemctl enable smbd
 sudo systemctl restart smbd
 
 echo "==> Allowing the web UI to toggle the share (sudoers rule)..."

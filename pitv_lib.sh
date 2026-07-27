@@ -52,16 +52,15 @@ set_volume()    { cfg set static_volume "$1" --int && golden_refresh_config; }
 set_power_mode(){ cfg set power_switch_mode "$1" && golden_refresh_config; }
 
 # ---- samba ------------------------------------------------------------------
-samba_present() { command -v smbd >/dev/null 2>&1; }
+# smbd lives in /usr/sbin which isn't on a non-login PATH, so detect via dpkg.
+samba_present() { dpkg -s samba >/dev/null 2>&1 || [ -x /usr/sbin/smbd ]; }
 samba_share_defined() { grep -q '^\[videos\]' /etc/samba/smb.conf 2>/dev/null; }
-samba_on() {  # is the share currently active?
-  samba_present && systemctl is-active --quiet smbd
-}
+samba_on() { systemctl is-active --quiet smbd; }  # is the share running now?
 samba_enable() {
-  if ! samba_present || ! samba_share_defined; then
-    bash "$PITV_DIR/setup_share.sh"
-  else
+  if samba_present && samba_share_defined; then
     sudo systemctl enable --now smbd
+  else
+    bash "$PITV_DIR/setup_share.sh"
   fi
 }
 samba_disable() { sudo systemctl disable --now smbd 2>/dev/null || true; }
