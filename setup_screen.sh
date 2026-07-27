@@ -16,6 +16,7 @@ set -e
 BOOT=/boot/firmware
 [ -d "$BOOT" ] || BOOT=/boot
 MARK="# --- pi-tv waveshare 2.8 dpi ---"
+ROT="${ROTATE:-270}"   # framebuffer rotation; override with ROTATE=90 etc.
 
 echo "==> Installing tools..."
 sudo apt update
@@ -70,11 +71,12 @@ ctl.!default {
 ALSAEOF
 fi
 
-if ! grep -q "video=DPI-1" "$BOOT/cmdline.txt"; then
-  echo "==> Setting portrait rotation in cmdline.txt..."
-  sudo sed -i '1s|^|video=DPI-1:480x640M@60,rotate=270 |' "$BOOT/cmdline.txt"
+if grep -qE 'video=DPI-1:[^ ]*rotate=[0-9]+' "$BOOT/cmdline.txt"; then
+  echo "==> Updating framebuffer rotation in cmdline.txt (rotate=$ROT)..."
+  sudo sed -i -E "s/(video=DPI-1:[^ ]*rotate=)[0-9]+/\1$ROT/" "$BOOT/cmdline.txt"
 else
-  echo "==> cmdline.txt already has DPI rotation, skipping"
+  echo "==> Setting portrait rotation in cmdline.txt (rotate=$ROT)..."
+  sudo sed -i "1s|^|video=DPI-1:480x640M@60,rotate=$ROT |" "$BOOT/cmdline.txt"
 fi
 
 echo

@@ -23,10 +23,22 @@ screen like an always-on TV. Rewrite of the dead `buba447/simpsonstv`
 - `config.json` — all tunables (see README "Configuration reference").
 
 ## Setup scripts
-`setup.sh` orchestrates: `install.sh` (packages+service), `setup_screen.sh`
-(Waveshare 2.8" DPI overlays + audio), `setup_share.sh` (Samba), `setup_exfat.sh`
-(grow root, mount exFAT data partition). `speedup_boot.sh` trims boot. Windows
-card-prep: `partition_card.ps1` / `prepare_card.ps1`.
+`setup.sh` orchestrates: `install.sh` (packages, service, self-heal golden copy,
+journald=volatile, installs `tvctl`), then `configure.sh` (the whiptail menu).
+`setup_screen.sh` (Waveshare 2.8" DPI overlays + audio; honours `ROTATE`),
+`setup_share.sh` (Samba), `setup_exfat.sh` (grow root, mount exFAT).
+`speedup_boot.sh` trims boot. Windows card-prep: `partition_card.ps1` /
+`prepare_card.ps1`.
+
+## Settings control surface (don't hand-edit config.json)
+- `pitv_config.py` — the only thing that writes `config.json` (valid JSON, atomic).
+  `rotate <deg>` sets `osd_rotate` + `touch.rotate` + mpv `--video-rotate` together.
+- `pitv_lib.sh` — shared bash helpers (`set_rotation` also rewrites the
+  `cmdline.txt` framebuffer `rotate=`; samba on/off; `golden_refresh_*`).
+- `configure.sh` — whiptail menu (`tvctl reconfigure`).
+- `tvctl` (→ `/usr/local/bin/tvctl`, a launcher that sets `PITV_DIR` and execs
+  `tvctl.sh`): `status|rotate|volume|port|power|samba|golden|heal|update|logs`.
+  All setters refresh the golden copy and restart the service.
 
 ## Hard-won gotchas (things that already bit us — don't re-break)
 - **GPIO map is specific to the Waveshare 2.8" DPI screen:** backlight = GPIO 18,

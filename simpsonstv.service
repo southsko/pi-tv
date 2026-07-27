@@ -7,6 +7,9 @@ Type=simple
 User=pi
 SupplementaryGroups=video render audio gpio input
 WorkingDirectory=/home/pi/simpsonstv
+# Power-loss self-heal: restore any zeroed/corrupt source before start.
+# Leading "-" so a missing golden copy can never block the service.
+ExecStartPre=-/bin/bash /home/pi/simpsonstv-golden/heal.sh
 ExecStart=/usr/bin/python3 /home/pi/simpsonstv/tv.py
 Restart=always
 RestartSec=3

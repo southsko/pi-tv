@@ -5,10 +5,9 @@
 #   git clone https://github.com/southsko/pi-tv.git ~/pi-tv
 #   cd ~/pi-tv && bash setup.sh
 #
-# Does everything: packages, static clip, Samba share, exFAT data partition
-# (if the card has one), systemd service — and starts the TV.
-#
-# Flags (env vars):  SKIP_SAMBA=1  SKIP_EXFAT=1
+# Installs everything (packages, service, power-loss self-heal, tvctl), then
+# opens a menu to pick the screen, rotation, Samba share, exFAT, etc.
+# Re-run any time, or use `tvctl reconfigure`, to change things later.
 set -e
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -25,52 +24,25 @@ bash install.sh
 if [ "$(systemctl get-default)" = "graphical.target" ]; then
   echo "==> Desktop image detected - switching to console boot (desktop stays installed)"
   sudo systemctl set-default multi-user.target
-  NEED_REBOOT=1
 fi
 
-if [ -z "$SKIP_SCREEN" ]; then
-  if grep -q "pi-tv waveshare" /boot/firmware/config.txt /boot/config.txt 2>/dev/null; then
-    echo "==> Screen already configured"
-  else
-    read -r -p "Configure the Waveshare 2.8\" DPI touch screen? [Y/n] " a
-    if [ "$a" != "n" ] && [ "$a" != "N" ]; then
-      bash setup_screen.sh
-      NEED_REBOOT=1
-    fi
-  fi
-fi
-
-if [ -z "$SKIP_SAMBA" ]; then
-  bash setup_share.sh
-else
-  echo "==> Skipping Samba (SKIP_SAMBA set)"
-fi
-
-if [ -z "$SKIP_EXFAT" ]; then
-  DEV=/dev/mmcblk0
-  if sudo blkid -t TYPE=exfat -o device 2>/dev/null | grep -q "^$DEV" \
-     || { [ -b "${DEV}p3" ] && ! sudo blkid "${DEV}p3" >/dev/null 2>&1; }; then
-    bash setup_exfat.sh
-  else
-    echo "==> No exFAT/data partition on the card — skipping."
-    echo "    (Only possible on a freshly flashed card, before first boot:"
-    echo "     see 'exFAT partition' in the README. Samba/SFTP/web uploads"
-    echo "     all work regardless.)"
-  fi
-fi
+# Smart interactive configuration (rotation, screen, Samba, exFAT, ports...).
+echo "==> Opening the configuration menu..."
+PITV_DIR="$DIR" bash "$DIR/configure.sh" || true
 
 echo "==> Starting the TV..."
 sudo systemctl restart simpsonstv
 
+HOST="$(hostname)"
+PORT="$(PITV_CONFIG="$DIR/config.json" python3 "$DIR/pitv_config.py" get web_port)"
 echo
 echo "=========================================="
 echo "  Done!"
 echo "  Videos:      $DIR/videos/<channel>/"
-echo "  Web remote:  http://$(hostname).local:8080"
-echo "  Net share:   \\\\$(hostname)\\videos"
-echo "  Logs:        journalctl -u simpsonstv -f"
+echo "  Web remote:  http://$HOST.local:${PORT:-8080}"
+echo "  Net share:   \\\\$HOST\\videos   (if Samba enabled)"
+echo "  Control:     tvctl status | tvctl reconfigure"
+echo "  Logs:        tvctl logs"
 echo "=========================================="
-if [ -n "$NEED_REBOOT" ]; then
-  echo
-  echo ">>> Screen was just configured - REBOOT to bring it up:  sudo reboot"
-fi
+echo
+echo "If you configured the screen or switched off the desktop, reboot once:  sudo reboot"

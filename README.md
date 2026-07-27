@@ -65,11 +65,13 @@ Pi Zero 2 W note: if greys look green on this screen, run
    git clone https://github.com/southsko/pi-tv.git ~/pi-tv
    cd ~/pi-tv && bash setup.sh
    ```
-   That's it — packages, static-effect clip, Samba share, systemd service, and
-   (if the card has one) the exFAT data partition, all set up and running.
+   It installs packages, the static-effect clip, the systemd service and the
+   power-loss self-heal, then opens a **menu** (whiptail) where you pick the
+   screen, rotation, Samba share on/off, exFAT, web port, and volume — no file
+   editing. Re-run `bash setup.sh`, or `tvctl reconfigure`, to change things
+   later.
    Want the exFAT card-in-Windows option? Do the `prepare_card.ps1` step right
    after flashing, *before* first boot — see "exFAT partition" below.
-   Skip parts with `SKIP_SAMBA=1 bash setup.sh` etc.
 3. Add episodes (each subfolder = one channel):
    ```
    videos/simpsons/S01E01.mp4
@@ -221,10 +223,32 @@ Afterwards all roads lead to the same place: card-in-Windows, Samba, SFTP, and
 web uploads all land on the exFAT partition. Notes: needs Windows 10 1703+ to
 see multiple partitions on an SD card; macOS reads exFAT fine too.
 
+## Changing settings — `tvctl` and the menu
+
+You normally never touch `config.json` by hand. Two front-ends write it for you
+(and keep it valid JSON, refresh the self-heal golden copy, and restart the TV):
+
+- **`tvctl reconfigure`** — the full whiptail menu (same one `setup.sh` opens).
+- **`tvctl <cmd>`** — one-liners, e.g.:
+  ```bash
+  tvctl status                 # service state, settings, web + share URLs
+  tvctl rotate 90              # rotation (video+touch+framebuffer together)
+  tvctl volume 60              # channel-change static loudness
+  tvctl port 8000              # web remote port
+  tvctl samba on | off         # network share of the videos folder
+  tvctl update                 # git pull + refresh golden copy + restart
+  tvctl logs                   # follow the log
+  ```
+  `tvctl rotate` sets `osd_rotate`, `touch.rotate`, the mpv `--video-rotate`
+  flag **and** the framebuffer `rotate=` in `cmdline.txt` in one shot (the
+  framebuffer part needs a reboot). See "Power-loss hardening" for why editing
+  files directly means you should also run `tvctl golden` afterward.
+
 ## Configuration reference
 
-Everything lives in `config.json` (edit, then `sudo systemctl restart
-simpsonstv`). Defaults shown.
+Everything lives in `config.json`. Prefer `tvctl` / the menu over editing it by
+hand; if you do edit it, run `tvctl golden` then `sudo systemctl restart
+simpsonstv`. Defaults shown.
 
 | Key | Default | What it does |
 |---|---|---|
@@ -252,7 +276,7 @@ simpsonstv`). Defaults shown.
 
 | Var | Used by | Effect |
 |---|---|---|
-| `SKIP_SAMBA`, `SKIP_EXFAT`, `SKIP_SCREEN` | `setup.sh` | Skip that install step |
+| `ROTATE` | `setup_screen.sh` | Framebuffer rotation to write to `cmdline.txt` (default `270`) |
 | `ZERO_FIX=1` | `setup_screen.sh` | Apply the Pi Zero 2 W green-tint overlay fix |
 | `HEIGHT`, `CRF`, `PRESET` | `pi_convert.py`, `encode.py` | Output height, quality (lower = better/bigger), x264 speed |
 | `SKIP` | `encode.py` | Comma-separated words to ignore (default `sample`) |
@@ -268,7 +292,12 @@ simpsonstv`). Defaults shown.
 - `touch.py` — touchscreen gestures (evdev)
 - `webui.py` — Flask web remote + file manager
 - `config.json` — pins, port, mpv flags, touch gestures, rotation
-- `setup.sh` — one-shot installer (calls the rest)
+- `tvctl.sh` — the `tvctl` control command (installed to `/usr/local/bin/tvctl`)
+- `configure.sh` — whiptail settings menu (`tvctl reconfigure`)
+- `pitv_config.py` — validates/writes `config.json`; keeps rotation keys in sync
+- `pitv_lib.sh` — shared shell helpers for the installer and `tvctl`
+- `heal.sh` — power-loss self-heal (service `ExecStartPre`; lives in the golden copy)
+- `setup.sh` — one-shot installer (calls the rest, then the menu)
 - `install.sh`, `simpsonstv.service` — core install
 - `setup_screen.sh` — Waveshare 2.8" DPI screen + audio config
 - `setup_share.sh` — Samba share
