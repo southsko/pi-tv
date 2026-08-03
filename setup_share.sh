@@ -34,9 +34,13 @@ fi
 sudo systemctl enable smbd
 sudo systemctl restart smbd
 
-echo "==> Allowing the web UI to toggle the share (sudoers rule)..."
+echo "==> Installing the share-auth helper (/usr/local/sbin/pitv-share-auth)..."
+# Root-owned copy so the web UI can't tamper with what runs as root.
+sudo install -o root -g root -m 0755 "$DIR/pitv_share_auth.sh" /usr/local/sbin/pitv-share-auth
+
+echo "==> Allowing the web UI to toggle the share + manage its login (sudoers)..."
 sudo tee /etc/sudoers.d/simpsonstv-samba >/dev/null <<EOF
-$USER ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl stop smbd, /usr/bin/systemctl enable smbd, /usr/bin/systemctl disable smbd
+$USER ALL=(root) NOPASSWD: /usr/bin/systemctl start smbd, /usr/bin/systemctl stop smbd, /usr/bin/systemctl enable smbd, /usr/bin/systemctl disable smbd, /usr/local/sbin/pitv-share-auth
 EOF
 sudo chmod 440 /etc/sudoers.d/simpsonstv-samba
 
@@ -44,5 +48,7 @@ echo
 echo "Done. On Windows open:  \\\\$(hostname)\\videos"
 echo "On Mac/Linux:           smb://$(hostname).local/videos"
 echo
-echo "Note: the share allows guest write access — fine for a home LAN,"
-echo "not for anything else. Each subfolder you create becomes a channel."
+echo "Note: the share starts with guest write access — fine for a home LAN."
+echo "To require a login, open the web UI's Samba panel, set a username +"
+echo "password, and hit \"Require login\" (or \"Make open\" to go back)."
+echo "Each subfolder you create becomes a channel."

@@ -74,15 +74,40 @@ menu_power() {
 }
 
 menu_samba() {
-  if samba_on; then
-    whiptail --title "Samba share" --yesno "Samba share is ON:\n  \\\\$(this_host)\\videos\n\nTurn it OFF?" 12 66 \
-      && { samba_disable; info "Samba share disabled."; }
-  else
+  if ! samba_on; then
     if whiptail --title "Samba share" --yesno "Samba share is OFF.\n\nTurn it ON? (installs Samba the first time)" 11 66; then
       if samba_present && samba_share_defined; then samba_enable; else run_plain samba_enable; fi
       samba_on && info "Samba share enabled:\n  \\\\$(this_host)\\videos"
     fi
+    return
   fi
+  local mode label choice u p
+  mode=$(samba_mode)
+  [ "$mode" = locked ] && label="login required (user: $(samba_user))" || label="open (no login)"
+  choice=$(whiptail --title "Samba share" --menu \
+    "Share is ON:  \\\\$(this_host)\\videos\nCurrent access: $label" 15 66 4 \
+    login "Require a username + password" \
+    open  "Make open (no login)" \
+    off   "Turn the share OFF" \
+    back  "Back" 3>&1 1>&2 2>&3) || return
+  case "$choice" in
+    off)  samba_disable; info "Samba share disabled." ;;
+    open) samba_open && info "Share is now open (no login)." ;;
+    login)
+      if ! samba_auth_ready; then
+        info "Login management needs the auth helper.\nRun:  bash setup_share.sh"
+        return
+      fi
+      u=$(whiptail --title "Samba login" --inputbox "Username:" 9 60 "$(samba_user)" 3>&1 1>&2 2>&3) || return
+      [ -n "$u" ] || { info "No username given."; return; }
+      p=$(whiptail --title "Samba login" --passwordbox "Password for $u:" 9 60 3>&1 1>&2 2>&3) || return
+      [ -n "$p" ] || { info "No password given."; return; }
+      if printf '%s\n' "$p" | samba_lock "$u"; then
+        info "Login set.\nConnect to \\\\$(this_host)\\videos as '$u'."
+      else
+        info "Failed to set the login."
+      fi ;;
+  esac
 }
 
 menu_screen() {

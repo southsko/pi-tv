@@ -14,6 +14,9 @@ Endpoints:
   POST /api/delete        {"channel": "...", "name": "..."}
   POST /api/rename        {"channel", "name", "new_name"}
   POST /api/mkchannel     {"name": "..."}
+  GET  /api/samba         share running state + mode (open/locked) + user
+  POST /api/samba         {"enabled": true/false} start/stop the share
+  POST /api/samba/auth    {"mode":"open"} or {"mode":"locked","user","password"}
 """
 import os
 import re
@@ -44,6 +47,44 @@ def _samba_set(on):
                        capture_output=True, timeout=15)
     return _samba_state()
 
+
+SHARE_AUTH_HELPER = "/usr/local/sbin/pitv-share-auth"
+
+
+def _samba_auth():
+    """Inspect the [videos] block of smb.conf.
+
+    Returns (mode, user): mode is 'open' (guest access), 'locked' (login
+    required), or None if the share/block isn't present. smb.conf is
+    world-readable, so this needs no privileges.
+    """
+    try:
+        with open("/etc/samba/smb.conf", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except OSError:
+        return (None, "")
+    in_block = False
+    guest = None
+    user = ""
+    for raw in lines:
+        s = raw.strip()
+        if s.startswith("["):
+            in_block = (s.lower() == "[videos]")
+            continue
+        if not in_block or "=" not in s:
+            continue
+        key, _, val = s.partition("=")
+        key, val = key.strip().lower(), val.strip()
+        if key == "guest ok":
+            guest = val.lower() == "yes"
+        elif key == "valid users":
+            user = val
+        elif key == "force user" and not user:
+            user = val
+    if guest is None:
+        return (None, user)
+    return (("open" if guest else "locked"), user)
+
 PAGE = """<!doctype html>
 <html><head>
 <meta charset="utf-8">
@@ -64,9 +105,9 @@ PAGE = """<!doctype html>
   button.alt { background:var(--accent2); color:#fff; }
   button.ghost { background:#453370; color:#fff; }
   button.mini { flex:0 0 auto; padding:6px 10px; font-size:.8em; }
-  select,input[type=range],input[type=file],input[type=text] { width:100%; }
-  select,input[type=text] { padding:10px; border-radius:8px; border:0; margin-top:6px;
-           background:#453370; color:#fff; font-size:1em; }
+  select,input[type=range],input[type=file],input[type=text],input[type=password] { width:100%; }
+  select,input[type=text],input[type=password] { padding:10px; border-radius:8px; border:0;
+           margin-top:6px; background:#453370; color:#fff; font-size:1em; }
   label { font-size:.8em; color:#cfc3f5; }
   #power.off { background:#555; color:#ccc; }
   progress { width:100%; height:6px; }
@@ -112,6 +153,24 @@ PAGE = """<!doctype html>
   <div class="small" id="upmsg"></div>
 </div>
 <div class="panel">
+  <div class="row" style="align-items:center">
+    <label style="flex:1">Network share (Samba)</label>
+    <button id="samba" class="mini ghost" onclick="toggleSamba()">&hellip;</button>
+  </div>
+  <div class="small" id="sambamsg"></div>
+  <div id="sambaauth" style="display:none;margin-top:10px">
+    <div class="small" id="sambamode"></div>
+    <input type="text" id="smbuser" placeholder="username" autocomplete="off"
+           autocapitalize="off" spellcheck="false">
+    <input type="password" id="smbpass" placeholder="password" autocomplete="new-password">
+    <div class="row" style="margin-top:8px">
+      <button class="mini" onclick="lockShare()">Require login</button>
+      <button class="mini alt" onclick="openShare()">Make open</button>
+    </div>
+    <div class="small" id="sambaauthmsg"></div>
+  </div>
+</div>
+<div class="panel">
   <label>Files</label>
   <select id="fmch" onchange="renderFiles()"></select>
   <div id="filelist"></div>
@@ -120,13 +179,6 @@ PAGE = """<!doctype html>
     <button class="mini ghost" onclick="mkChannel()">Create</button>
   </div>
   <div class="small" id="disk"></div>
-</div>
-<div class="panel">
-  <div class="row" style="align-items:center">
-    <label style="flex:1">Network share (Samba)</label>
-    <button id="samba" class="mini ghost" onclick="toggleSamba()">&hellip;</button>
-  </div>
-  <div class="small" id="sambamsg"></div>
 </div>
 <script>
 let filesData = {};
@@ -202,14 +254,27 @@ async function loadSamba() {
     sambaState = d.state;
     const btn = document.getElementById('samba');
     const msg = document.getElementById('sambamsg');
+    const auth = document.getElementById('sambaauth');
     if (d.state === 'absent') {
       btn.textContent = 'n/a';
       msg.textContent = 'not set up — run setup_share.sh on the TV once';
+      auth.style.display = 'none';
+      return;
+    }
+    btn.textContent = d.state === 'on' ? 'ON' : 'OFF';
+    btn.className = 'mini ' + (d.state === 'on' ? '' : 'alt');
+    msg.textContent = d.state === 'on'
+      ? 'visible as \\\\\\\\' + (d.host||'simpsonstv') + '\\\\videos' : 'share stopped';
+    auth.style.display = 'block';
+    const mode = document.getElementById('sambamode');
+    if (d.mode === 'locked') {
+      mode.textContent = 'Login required — user: ' + (d.user || '?');
+      const u = document.getElementById('smbuser');
+      if (!u.value) u.value = d.user || '';
+    } else if (d.mode === 'open') {
+      mode.textContent = 'Open — anyone on the network can read/write (no login)';
     } else {
-      btn.textContent = d.state === 'on' ? 'ON' : 'OFF';
-      btn.className = 'mini ' + (d.state === 'on' ? '' : 'alt');
-      msg.textContent = d.state === 'on'
-        ? 'visible as \\\\\\\\' + (d.host||'simpsonstv') + '\\\\videos' : 'share stopped';
+      mode.textContent = '';
     }
   } catch(e) {}
 }
@@ -218,6 +283,30 @@ async function toggleSamba() {
   await fetch('/api/samba', {method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({enabled: sambaState !== 'on'})});
+  loadSamba();
+}
+async function lockShare() {
+  const user = document.getElementById('smbuser').value.trim();
+  const password = document.getElementById('smbpass').value;
+  const m = document.getElementById('sambaauthmsg');
+  if (!user || !password) { m.textContent = 'enter a username and password'; return; }
+  m.textContent = 'saving…';
+  const r = await fetch('/api/samba/auth', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({mode:'locked', user, password})});
+  document.getElementById('smbpass').value = '';
+  m.textContent = r.ok ? 'login set — reconnect with the new credentials'
+                       : ('error: ' + (await r.text()));
+  loadSamba();
+}
+async function openShare() {
+  const m = document.getElementById('sambaauthmsg');
+  if (!confirm('Make the share open to anyone on the network (no login)?')) return;
+  m.textContent = 'saving…';
+  const r = await fetch('/api/samba/auth', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({mode:'open'})});
+  m.textContent = r.ok ? 'share is now open' : ('error: ' + (await r.text()));
   loadSamba();
 }
 async function mkChannel() {
@@ -324,13 +413,50 @@ def create_app(tv):
     @app.get("/api/samba")
     def samba_status():
         import socket
-        return jsonify(state=_samba_state(), host=socket.gethostname())
+        mode, user = _samba_auth()
+        return jsonify(state=_samba_state(), host=socket.gethostname(),
+                       mode=mode, user=user)
 
     @app.post("/api/samba")
     def samba_toggle():
         data = request.get_json(silent=True) or {}
         state = _samba_set(bool(data.get("enabled")))
         return jsonify(state=state)
+
+    @app.post("/api/samba/auth")
+    def samba_auth():
+        """Switch the share to open (guest) or locked (username + password).
+
+        The privileged work (creating the user, setting the Samba password,
+        rewriting smb.conf) is done by the root-owned helper, which the web UI
+        is allowed to run via a scoped NOPASSWD sudoers rule. The username is
+        validated again inside the helper; the password is passed on stdin so
+        it never shows up in the process list.
+        """
+        if not os.path.exists(SHARE_AUTH_HELPER):
+            return "share auth not set up — run setup_share.sh on the TV", 501
+        data = request.get_json(silent=True) or {}
+        mode = data.get("mode")
+        try:
+            if mode == "open":
+                r = subprocess.run(["sudo", "-n", SHARE_AUTH_HELPER, "open"],
+                                   capture_output=True, text=True, timeout=30)
+            elif mode == "locked":
+                user = (data.get("user") or "").strip()
+                password = data.get("password") or ""
+                if not user or not password:
+                    return "username and password required", 400
+                r = subprocess.run(["sudo", "-n", SHARE_AUTH_HELPER, "lock", user],
+                                   input=password, capture_output=True,
+                                   text=True, timeout=30)
+            else:
+                return "bad mode", 400
+        except subprocess.TimeoutExpired:
+            return "timed out", 504
+        if r.returncode != 0:
+            return (r.stderr.strip() or "failed"), 500
+        new_mode, new_user = _samba_auth()
+        return jsonify(ok=True, mode=new_mode, user=new_user)
 
     # -- file manager ------------------------------------------------------
 

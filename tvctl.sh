@@ -24,6 +24,8 @@ tvctl - control the Pi TV
   tvctl set <dotted.key> <val> [--int|--float|--bool|--json]
 
   tvctl samba <on|off|status>   network share of the videos folder
+  tvctl samba login <user>      require a username+password (prompts for pw)
+  tvctl samba open              drop the login, back to open guest access
   tvctl golden                  refresh the self-heal golden copy from live files
   tvctl heal                    run the self-heal check now
   tvctl update                  git pull, refresh golden, restart
@@ -39,7 +41,12 @@ case "${1:-}" in
     echo "service : $(systemctl is-active "$SERVICE") ($(systemctl is-enabled "$SERVICE" 2>/dev/null))"
     echo "rotation: $(cfg_get osd_rotate)deg   volume: $(cfg_get static_volume)   power: $(cfg_get power_switch_mode)"
     echo "web     : http://$(this_host).local:$(cfg_get web_port)  (or http://$(this_ip):$(cfg_get web_port))"
-    if samba_on; then echo "samba   : ON   \\\\$(this_host)\\videos"; else echo "samba   : off"; fi
+    if samba_on; then
+      case "$(samba_mode)" in
+        locked) echo "samba   : ON   \\\\$(this_host)\\videos  (login: $(samba_user))" ;;
+        *)      echo "samba   : ON   \\\\$(this_host)\\videos  (open)" ;;
+      esac
+    else echo "samba   : off"; fi
     ;;
   start)   tv_start ;;
   stop)    tv_stop ;;
@@ -58,8 +65,22 @@ case "${1:-}" in
     case "$2" in
       on)     samba_enable; samba_on && echo "samba ON: \\\\$(this_host)\\videos" ;;
       off)    samba_disable; echo "samba off" ;;
-      status|"") if samba_on; then echo "on"; else echo "off"; fi ;;
-      *) echo "usage: tvctl samba <on|off|status>"; exit 1 ;;
+      open)   samba_open && echo "share is now open (no login)" ;;
+      login)
+        u="$3"; [ -n "$u" ] || { echo "usage: tvctl samba login <user>"; exit 1; }
+        printf 'Samba password for %s: ' "$u" >&2; read -rs pw; echo >&2
+        [ -n "$pw" ] || { echo "no password given"; exit 1; }
+        printf '%s\n' "$pw" | samba_lock "$u" \
+          && echo "login set: '\\\\$(this_host)\\videos' now requires user '$u'" ;;
+      status|"")
+        if samba_on; then
+          case "$(samba_mode)" in
+            locked) echo "on (login required, user: $(samba_user))" ;;
+            open)   echo "on (open, no login)" ;;
+            *)      echo "on" ;;
+          esac
+        else echo "off"; fi ;;
+      *) echo "usage: tvctl samba <on|off|open|login <user>|status>"; exit 1 ;;
     esac
     ;;
 

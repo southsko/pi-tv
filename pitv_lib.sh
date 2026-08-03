@@ -65,6 +65,21 @@ samba_enable() {
 }
 samba_disable() { sudo systemctl disable --now smbd 2>/dev/null || true; }
 
+# Root-owned auth helper installed by setup_share.sh. Reads (status) need no
+# privileges; writes (lock/open) go through the scoped NOPASSWD sudoers rule.
+SHARE_AUTH="/usr/local/sbin/pitv-share-auth"
+samba_auth_ready() { [ -x "$SHARE_AUTH" ]; }
+samba_mode() { samba_auth_ready && "$SHARE_AUTH" status 2>/dev/null | sed -n 's/^mode=//p'; }
+samba_user() { samba_auth_ready && "$SHARE_AUTH" status 2>/dev/null | sed -n 's/^user=//p'; }
+samba_open() {  # make the share guest-accessible (no login)
+  samba_auth_ready || { echo "run setup_share.sh on the TV first" >&2; return 1; }
+  sudo -n "$SHARE_AUTH" open
+}
+samba_lock() {  # require login as user $1; password read from stdin
+  samba_auth_ready || { echo "run setup_share.sh on the TV first" >&2; return 1; }
+  sudo -n "$SHARE_AUTH" lock "$1"
+}
+
 # ---- service ----------------------------------------------------------------
 tv_restart() { sudo systemctl restart "$SERVICE"; }
 tv_start()   { sudo systemctl start "$SERVICE"; }
