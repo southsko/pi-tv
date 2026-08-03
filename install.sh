@@ -50,6 +50,10 @@ exec bash "\$PITV_DIR/tvctl.sh" "\$@"
 EOF
 sudo chmod +x /usr/local/bin/tvctl
 
+echo "==> Installing the login MOTD (web/share URLs, resolved live)..."
+sed "s|/home/pi/simpsonstv|$DIR|g" "$DIR/motd.sh" | sudo tee /etc/update-motd.d/99-pitv >/dev/null
+sudo chmod +x /etc/update-motd.d/99-pitv
+
 sudo systemctl daemon-reload
 sudo systemctl restart systemd-journald 2>/dev/null || true
 sudo systemctl enable simpsonstv
