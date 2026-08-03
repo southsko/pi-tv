@@ -813,6 +813,87 @@ def _strip_pixfmt(vargs):
     return out
 
 
+def _ffmpeg_ok(require_nvenc=False):
+    """True if ffmpeg+ffprobe run; optionally require the NVENC encoder."""
+    try:
+        r = subprocess.run(['ffmpeg', '-hide_banner', '-encoders'],
+                           capture_output=True, text=True, timeout=20)
+        if r.returncode != 0:
+            return False
+        if require_nvenc and 'h264_nvenc' not in r.stdout:
+            return False
+        subprocess.run(['ffprobe', '-version'],
+                       capture_output=True, timeout=20)
+        return True
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _ensure_ffmpeg():
+    """Make sure a usable ffmpeg is on PATH. On Linux x86-64 (Unraid), auto-
+    download a BtbN build WITH NVENC and cache it next to this script (which,
+    if the script lives on the array, persists across Unraid's RAM reboots)."""
+    if _ffmpeg_ok(require_nvenc=True):
+        return True                              # already perfect (has NVENC)
+
+    import platform
+    linux_x64 = (sys.platform.startswith('linux')
+                 and platform.machine() in ('x86_64', 'amd64'))
+    have_any = _ffmpeg_ok(require_nvenc=False)
+
+    if not linux_x64:
+        if have_any:
+            return True                          # usable (maybe CPU-only)
+        err("ffmpeg not found. Install a full build (Windows: gyan.dev 'full';"
+            " Linux: github.com/BtbN/FFmpeg-Builds) and put it on PATH.")
+        return False
+
+    cache = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".ffmpeg")
+    ff, fp = os.path.join(cache, "ffmpeg"), os.path.join(cache, "ffprobe")
+    if os.path.isfile(ff) and os.path.isfile(fp):
+        os.environ["PATH"] = cache + os.pathsep + os.environ.get("PATH", "")
+        if _ffmpeg_ok():
+            return True                          # cached copy works
+
+    url = ("https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/"
+           "ffmpeg-master-latest-linux64-gpl.tar.xz")
+    info("ffmpeg with NVENC not found — downloading a build (~40MB, one-time)")
+    info(f"  caching in {cache}")
+    try:
+        import urllib.request
+        import tarfile
+        os.makedirs(cache, exist_ok=True)
+        tmp = os.path.join(cache, "_dl.tar.xz")
+
+        def _hook(blocks, bs, total):
+            if total > 0:
+                pct = min(100, int(blocks * bs * 100 / total))
+                sys.stdout.write("\r  downloading... %3d%%" % pct)
+                sys.stdout.flush()
+        urllib.request.urlretrieve(url, tmp, _hook)
+        sys.stdout.write("\n")
+
+        with tarfile.open(tmp) as tar:
+            for m in tar.getmembers():
+                bn = os.path.basename(m.name)
+                if m.isfile() and bn in ("ffmpeg", "ffprobe"):
+                    m.name = bn
+                    tar.extract(m, cache)
+        os.remove(tmp)
+        os.chmod(ff, 0o755)
+        os.chmod(fp, 0o755)
+        os.environ["PATH"] = cache + os.pathsep + os.environ.get("PATH", "")
+        if _ffmpeg_ok():
+            ok(f"ffmpeg ready ({'NVENC' if _ffmpeg_ok(True) else 'CPU only'})")
+            return True
+        err("Downloaded ffmpeg but it won't run on this system.")
+        return have_any
+    except Exception as e:
+        err(f"Auto-download failed: {e}")
+        err("Manually put a BtbN ffmpeg/ffprobe on PATH.")
+        return have_any
+
+
 def _pipelines(enc, vargs):
     """Ordered (in_args, vf, vargs, tag) attempts, fastest first.
     For NVENC we also decode+scale on the GPU (NVDEC) — the software decode of
@@ -840,7 +921,11 @@ def run_convert(selected, out_dir):
 
     os.makedirs(out_dir, exist_ok=True)
 
-    print(); info("Detecting GPU encoder...")
+    print()
+    if not _ensure_ffmpeg():
+        return
+
+    info("Detecting GPU encoder...")
     vargs, enc = _pick_vcodec()
     ladder = _pipelines(enc, vargs)
     stage = 0                       # sticky: once a stage fails we stay dropped
