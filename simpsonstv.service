@@ -6,6 +6,8 @@ After=local-fs.target
 Type=simple
 User=pi
 SupplementaryGroups=video render audio gpio input
+# Let the unprivileged service bind low ports (e.g. web_port=80) without root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 WorkingDirectory=/home/pi/simpsonstv
 # Power-loss self-heal: restore any zeroed/corrupt source before start.
 # Leading "-" so a missing golden copy can never block the service.
